@@ -1,0 +1,1 @@
+# firefox-vinted-item-refresher
