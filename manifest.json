@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Vinted Item Refresher",
+  "version": "1.4.4",
+  "description": "Select and refresh your Vinted listings",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "vinted-item-refresher@djagodzki",
+      "strict_min_version": "128.0"
+    }
+  },
+  "permissions": ["tabs", "scripting", "storage"],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "host_permissions": [
+    "https://www.vinted.pl/*",
+    "https://images1.vinted.net/*",
+    "https://images2.vinted.net/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.vinted.pl/member/*",
+        "https://www.vinted.pl/items/*"
+      ],
+      "js": ["photo-selection.js", "job-delay.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.vinted.pl/items/*"],
+      "js": ["content-main.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

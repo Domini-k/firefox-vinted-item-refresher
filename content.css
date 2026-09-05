@@ -1,0 +1,259 @@
+/* All classes prefixed sah- to avoid clashing with Vinted styles */
+
+:root {
+  --sah-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ── Toolbar (right-edge vertical stack) ────────────────────────────────── */
+.sah-toolbar {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 0;
+}
+.sah-toolbar-section-label {
+  font: 700 9px/1 var(--sah-font);
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  padding: 3px 10px 3px 14px;
+  margin-top: 6px;
+  background: rgba(30, 30, 30, 0.72);
+  border-radius: 5px 0 0 5px;
+  pointer-events: none;
+  user-select: none;
+}
+.sah-toolbar-section-label:first-child { margin-top: 0; }
+.sah-toolbar-btn {
+  background: #09B1BA;
+  color: #fff;
+  border: none;
+  border-radius: 8px 0 0 8px;
+  padding: 11px 16px;
+  font: 600 12px/1.2 var(--sah-font);
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: left;
+  box-shadow: -3px 2px 10px rgba(0, 0, 0, 0.22);
+  transition: background 0.15s, transform 0.15s;
+  user-select: none;
+}
+.sah-toolbar-btn:hover {
+  background: #07999f;
+  transform: translateX(-4px);
+}
+.sah-toolbar-btn--active {
+  background: #065f65;
+}
+/* Global actions — purple */
+.sah-toolbar-btn--global { background: #7B61FF; }
+.sah-toolbar-btn--global:hover { background: #6549e8; }
+.sah-toolbar-btn--global.sah-toolbar-btn--active { background: #4a31b5; }
+/* Danger — red */
+.sah-toolbar-btn--danger { background: #DC2626; }
+.sah-toolbar-btn--danger:hover { background: #B91C1C; }
+/* Debug — gray */
+.sah-toolbar-btn--debug { background: #6B7280; }
+.sah-toolbar-btn--debug:hover { background: #4B5563; }
+.sah-toolbar-btn--debug.sah-toolbar-btn--active { background: #374151; }
+/* ── On-screen log box ───────────────────────────────────────────────────── */
+.sah-log {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  z-index: 2147483644;
+  display: none;
+  width: 300px;
+  max-height: 200px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  flex-direction: column;
+  font-family: var(--sah-font);
+  overflow: hidden;
+}
+.sah-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid #e5e5e5;
+  flex-shrink: 0;
+}
+.sah-log-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #09B1BA;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.sah-log-clear {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: #aaa;
+  padding: 0;
+}
+.sah-log-clear:hover { color: #666; }
+.sah-log-entries {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px 10px;
+}
+.sah-log-entry {
+  font-size: 11px;
+  color: #444;
+  line-height: 1.6;
+  font-family: 'Courier New', monospace;
+  word-break: break-all;
+}
+.sah-log--visible {
+  display: flex;
+}
+
+/* ── Grid item positioning anchor ────────────────────────────────────────── */
+[data-testid="grid-item"] {
+  position: relative;
+}
+
+/* ── Radio overlay (single-select) ──────────────────────────────────────── */
+.sah-radio {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.38);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+.sah-radio--checked {
+  background: #09B1BA;
+  border-color: #09B1BA;
+}
+.sah-radio--checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+/* ── Checkbox overlay (multi-select) ─────────────────────────────────────── */
+.sah-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.38);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+.sah-checkbox--checked {
+  background: #09B1BA;
+  border-color: #09B1BA;
+}
+.sah-checkbox--checked::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 6px;
+  height: 11px;
+  border: 2.5px solid #fff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
+/* Selected card highlight */
+[data-testid="grid-item"].sah-selected .new-item-box__container {
+  outline: 3px solid #09B1BA;
+  border-radius: 8px;
+  outline-offset: 1px;
+}
+
+
+/* ── Bottom bar (multi-select) ───────────────────────────────────────────── */
+.sah-bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 2147483645;
+  background: #fff;
+  border-top: 1px solid #e5e5e5;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--sah-font);
+  transform: translateY(100%);
+  transition: transform 0.2s ease;
+}
+.sah-bottom-bar--visible { transform: translateY(0); }
+
+.sah-count {
+  font-size: 15px;
+  font-weight: 600;
+  color: #2d2d2d;
+}
+.sah-bar-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* ── Shared button styles ────────────────────────────────────────────────── */
+.sah-btn {
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--sah-font);
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+.sah-btn:hover { opacity: 0.82; }
+.sah-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.sah-btn--primary   { background: #09B1BA; color: #fff; }
+.sah-btn--secondary { background: #2d2d2d; color: #fff; }
+.sah-btn--ghost     { background: transparent; color: #666; border: 1px solid #ddd; }
+
+.sah-live-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 5px;
+  line-height: 1.6;
+  background: rgba(9,177,186,0.15);
+  color: #09B1BA;
+}
+

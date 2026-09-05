@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vinted Refresher</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="pr-container">
+    <h1 class="pr-title">Vinted Refresher</h1>
+    <p class="pr-version">v1.4.4</p>
+    <div class="pr-queue" id="pr-queue">...</div>
+    <div class="pr-setting">
+      <label class="pr-setting-label" for="pr-pause">Pause between jobs (seconds)</label>
+      <input class="pr-setting-input" id="pr-pause" type="number" min="0" step="1" value="0" />
+    </div>
+    <p class="pr-status" id="pr-status">Loading...</p>
+    <button class="pr-kill-btn" id="pr-kill">Stop all jobs</button>
+    <p class="pr-kill-feedback" id="pr-kill-feedback"></p>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
