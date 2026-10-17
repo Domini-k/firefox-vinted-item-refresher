@@ -38,7 +38,7 @@ function wireChips(page) {
 }
 
 function wireOptions(page, root) {
-  const input = page.q('[data-testid="category-size-single-grid-input"]');
+  const input = page.q('[data-testid="category-size-single-grid-input"], input#size');
   const options = Array.from(root.querySelectorAll('[role="checkbox"]'));
   options.forEach((option) => {
     option.addEventListener('click', () => {
@@ -88,6 +88,97 @@ test('fillSize selects the alpha token on the default S/M/L chip', suiteOpts, as
   const root = page.internals.sizeDropdownRoot();
   wireChips(page);
   wireOptions(page, root);
+
+  const ok = await new Promise((resolve) => {
+    page.internals.fillSize('M / 38 / 10', resolve);
+  });
+
+  assert.equal(ok, true);
+  assert.equal(page.q('[data-testid="category-size-single-grid-input"]').value, 'M');
+  page.close();
+});
+
+test('fillSize finds the size input by id when the data-testid changes', suiteOpts, async () => {
+  const snapshot = fs.readFileSync(SIZE_HTML, 'utf8');
+  const page = createPage(
+    '<!DOCTYPE html><html><body>' +
+      '<input id="size" name="size" readonly value="" />' +
+      '<span data-testid="category-size-single-grid-chevron-down"></span>' +
+      '<div id="size-slot">' + snapshot + '</div>' +
+    '</body></html>',
+    'https://www.vinted.pl/items/new',
+    {}
+  );
+
+  const root = page.internals.sizeDropdownRoot();
+  wireChips(page);
+  wireOptions(page, root);
+
+  const ok = await new Promise((resolve) => {
+    page.internals.fillSize('M / 38 / 10', resolve);
+  });
+
+  assert.equal(ok, true);
+  assert.equal(page.q('#size').value, 'M');
+  page.close();
+});
+
+test('fillSize supports the category-size-single-grid_chips testid variant', suiteOpts, async () => {
+  const snapshot = fs.readFileSync(SIZE_HTML, 'utf8');
+  const page = createPage(
+    '<!DOCTYPE html><html><body>' +
+      '<input data-testid="category-size-single-grid_chips-input" id="size" name="size" readonly value="" />' +
+      '<span data-testid="category-size-single-grid_chips-chevron-down"></span>' +
+      '<div id="size-slot">' + snapshot + '</div>' +
+    '</body></html>',
+    'https://www.vinted.pl/items/new',
+    {}
+  );
+
+  const root = page.internals.sizeDropdownRoot();
+  wireChips(page);
+  wireOptions(page, root);
+
+  const ok = await new Promise((resolve) => {
+    page.internals.fillSize('M / 38 / 10', resolve);
+  });
+
+  assert.equal(ok, true);
+  assert.equal(page.q('[data-testid="category-size-single-grid_chips-input"]').value, 'M');
+  page.close();
+});
+
+test('fillSize clicks S/M/L before selecting from the grid', async () => {
+  const page = createPage(
+    '<!DOCTYPE html><html><body>' +
+      '<input data-testid="category-size-single-grid-input" id="size" readonly value="" />' +
+      '<span data-testid="category-size-single-grid-chevron-down"></span>' +
+      '<div class="web_ui__Card__card">' +
+        '<div data-testid="size-grid-chips">' +
+          '<div><button type="button">S/M/L</button></div>' +
+          '<div><button type="button">EU</button></div>' +
+        '</div>' +
+        '<div id="grid"></div>' +
+      '</div>' +
+    '</body></html>',
+    'https://www.vinted.pl/items/new',
+    {}
+  );
+
+  const sml = page.qa('[data-testid="size-grid-chips"] button')
+    .find((button) => button.textContent.trim() === 'S/M/L');
+  assert.ok(sml, 'S/M/L chip exists');
+
+  sml.addEventListener('click', () => {
+    sml.setAttribute('aria-pressed', 'true');
+    page.q('#grid').innerHTML =
+      '<ul>' +
+        '<li><div role="checkbox" aria-checked="false" aria-label="M" data-testid="size-group-80-grid-option-1739"><span>M</span></div></li>' +
+        '<li><div role="checkbox" aria-checked="false" aria-label="L" data-testid="size-group-80-grid-option-1740"><span>L</span></div></li>' +
+      '</ul>';
+    const root = page.internals.sizeDropdownRoot();
+    wireOptions(page, root);
+  });
 
   const ok = await new Promise((resolve) => {
     page.internals.fillSize('M / 38 / 10', resolve);

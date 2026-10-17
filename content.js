@@ -587,6 +587,10 @@
       }
     };
     localStorage.setItem(SAH_RELIST_KEY, JSON.stringify(job));
+    const missingSizes = items.filter(function (it) { return !it.size; });
+    if (missingSizes.length) {
+      sahLog('Items without member-card size: ' + missingSizes.map(function (it) { return it.title; }).join(' | '));
+    }
     sahLog('Full Refresh: ' + items.length + ' item(s) queued — opening edit tab...');
     const tab = window.open('https://www.vinted.pl/items/' + first.id + '/edit', '_blank');
     if (!tab) {
@@ -612,6 +616,7 @@
     waitRemainingPause(job, 3000, function () {
       const scraped = scrapeItemFromNextData() || {};
       relistLog('__NEXT_DATA__: title=' + (scraped.title || 'NONE') + ' photos=' + (scraped.photos || []).length);
+      relistLog('Size sources: nextData="' + (scraped.size || 'NONE') + '" memberCard="' + (job.size || 'NONE') + '"');
       if (!scraped.title) {
         scraped.title = truncateTitle(job.title || '', function (before, after) {
           relistLog('Title truncated: ' + before + ' -> ' + after + ' chars');
@@ -635,6 +640,7 @@
             if (attrs.catalogId && !scraped.catalogId)    scraped.catalogId    = attrs.catalogId;
             if (attrs.brand)                               scraped.brand        = attrs.brand;
             if (attrs.size)                                scraped.size         = attrs.size;
+            relistLog('Size final: dom="' + (attrs.size || 'NONE') + '" value="' + (scraped.size || 'NONE') + '"');
             if (attrs.condition)                           scraped.condition    = attrs.condition;
             if (attrs.shipmentSize)                        scraped.shipmentSize = attrs.shipmentSize;
             if (attrs.colors && attrs.colors.length)       scraped.colors       = attrs.colors;
@@ -1366,6 +1372,23 @@
     return { raw: raw, tokens: tokens, alpha: alpha, numeric: numeric };
   }
 
+  var SIZE_INPUT_SELECTOR =
+    '[data-testid="category-size-single-grid_chips-input"], ' +
+    '[data-testid="category-size-single-grid-input"], ' +
+    'input#size[name="size"], input#size, input[name="size"]';
+
+  var SIZE_CONTENT_SELECTOR =
+    '[data-testid="category-size-single-grid_chips-content"], ' +
+    '[data-testid="category-size-single-grid-content"]';
+
+  var SIZE_CHEVRON_SELECTOR =
+    '[data-testid^="category-size-single-grid_chips-chevron"], ' +
+    '[data-testid^="category-size-single-grid-chevron"]';
+
+  function findSizeInput() {
+    return document.querySelector(SIZE_INPUT_SELECTOR);
+  }
+
   function sizeOptionLabel(el) {
     if (!el) return '';
     var label = normalizeSizeText(el.getAttribute('aria-label') || '');
@@ -1376,10 +1399,10 @@
   function sizeDropdownRoot() {
     var chips = document.querySelector('[data-testid="size-grid-chips"]');
     if (chips) {
-      return chips.closest('[data-testid="category-size-single-grid-content"]') ||
-             chips.closest('.web_ui__Card__card') ||
-             chips.parentElement ||
-             null;
+    return chips.closest(SIZE_CONTENT_SELECTOR) ||
+           chips.closest('.web_ui__Card__card') ||
+           chips.parentElement ||
+           null;
     }
 
     // Some categories have no chip bar — only a single size grid.
@@ -1389,7 +1412,7 @@
 
     if (!option) return null;
 
-    return option.closest('[data-testid="category-size-single-grid-content"]') ||
+    return option.closest(SIZE_CONTENT_SELECTOR) ||
            option.closest('.web_ui__Card__card') ||
            option.parentElement ||
            null;
@@ -1453,6 +1476,21 @@
       /^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|4XL|5XL|6XL|7XL|8XL|9XL)$/i.test(value);
   }
 
+  function chooseSizeChip(chips, parsed) {
+    if (!chips || !chips.length) return null;
+
+    var alphaChip = chips.find(function (button) {
+      return sizeChipIsAlpha(sizeChipLabel(button));
+    });
+    var numericChip = chips.find(function (button) {
+      return !sizeChipIsAlpha(sizeChipLabel(button));
+    });
+
+    if (parsed.alpha.length && alphaChip) return alphaChip;
+    if (!parsed.alpha.length && numericChip) return numericChip;
+    return chips[0];
+  }
+
   function findSizeTokenOption(options, token, numericPreferred) {
     var normalized = normalizeSizeText(token);
     if (!normalized) return null;
@@ -1484,7 +1522,7 @@
   }
 
   function triggerSizeValue() {
-    var input = document.querySelector('[data-testid="category-size-single-grid-input"]');
+    var input = findSizeInput();
     return normalizeSizeText(input ? input.value : '');
   }
 
@@ -1497,7 +1535,8 @@
   }
 
   function scrapeSelectedSize() {
-    var value = getTestIdVal('category-size-single-grid-input');
+    var sizeInput = findSizeInput();
+    var value = sizeInput ? (sizeInput.value || sizeInput.getAttribute('value') || '') : '';
     if (value) return normalizeSizeText(value);
 
     var selected = document.querySelector('[data-testid^="size-group-"][aria-checked="true"]') ||
@@ -1567,31 +1606,44 @@
   }
 
   function clickSizeChip(label, cb) {
-    var root = sizeDropdownRoot();
-    var button = sizeChipButtons(root).find(function (candidate) {
-      return sizeChipLabel(candidate) === label;
-    });
+    var attempt = 0;
 
-    if (!button) {
-      relistLog('fillSize: chip not found "' + label + '"');
-      cb(false);
-      return;
+    function next() {
+      var root = sizeDropdownRoot();
+      var button = sizeChipButtons(root).find(function (candidate) {
+        return sizeChipLabel(candidate) === label;
+      });
+
+      if (!button) {
+        relistLog('fillSize: chip not found "' + label + '"');
+        cb(false);
+        return;
+      }
+
+      var candidates = [button];
+      var span = button.querySelector('span');
+      if (span) candidates.push(span);
+      if (button.parentElement) candidates.push(button.parentElement);
+
+      var candidate = candidates[Math.min(attempt, candidates.length - 1)];
+      attempt++;
+      relistLog('fillSize: chip click attempt ' + attempt + ' on "' + label + '"');
+      tryClickElement(candidate);
+
+      setTimeout(function () {
+        var freshRoot = sizeDropdownRoot();
+        var freshButton = sizeChipButtons(freshRoot).find(function (candidateButton) {
+          return sizeChipLabel(candidateButton) === label;
+        });
+        var pressed = freshButton && freshButton.getAttribute('aria-pressed') === 'true';
+
+        if (pressed) { cb(true); return; }
+        if (attempt >= candidates.length) { cb(true); return; }
+        next();
+      }, 450);
     }
 
-    var attr = 'data-sah-size-chip';
-    var token = 'chip' + Date.now() + Math.floor(Math.random() * 1000);
-    var hadAttr = button.hasAttribute(attr);
-    var previous = button.getAttribute(attr);
-
-    button.setAttribute(attr, token);
-    relistLog('fillSize: switching chip to "' + label + '"');
-    pageClick('[' + attr + '="' + token + '"]');
-
-    setTimeout(function () {
-      if (hadAttr) button.setAttribute(attr, previous);
-      else button.removeAttribute(attr);
-      cb(true);
-    }, 500);
+    next();
   }
 
   function clickSizeOption(label, token, cb) {
@@ -1639,14 +1691,14 @@
     var root = sizeDropdownRoot();
     if (!root || !isVisible(root)) return;
 
-    var chevron = document.querySelector('[data-testid^="category-size-single-grid-chevron"]');
+    var chevron = document.querySelector(SIZE_CHEVRON_SELECTOR);
     if (chevron && chevron.getAttribute('data-testid')) {
       pageClick('[data-testid="' + chevron.getAttribute('data-testid') + '"]');
       return;
     }
 
-    var input = document.querySelector('[data-testid="category-size-single-grid-input"]');
-    if (input) pageClick('[data-testid="category-size-single-grid-input"]');
+    var input = findSizeInput();
+    if (input) tryClickElement(input);
   }
 
   function waitForSizeOptions(root, timeoutMs, cb) {
@@ -1715,14 +1767,25 @@
     if (!parsed.raw) { cb(false); return; }
     relistLog('fillSize: target="' + parsed.raw + '" tokens=[' + parsed.tokens.join(',') + ']');
 
-    waitForElement('[data-testid="category-size-single-grid-input"]', 8000, function (input) {
-      if (!input) { relistLog('fillSize: size input NOT found after 8s'); cb(false); return; }
+    waitForElement(SIZE_INPUT_SELECTOR, 8000, function (input) {
+      if (!input) {
+        var fields = Array.from(document.querySelectorAll('input[id], [data-testid$="-input"]'))
+          .slice(0, 30)
+          .map(function (el) {
+            return el.tagName.toLowerCase() +
+              (el.id ? '#' + el.id : '') +
+              (el.getAttribute('data-testid') ? '[' + el.getAttribute('data-testid') + ']' : '');
+          });
+        relistLog('fillSize: size input NOT found after 8s. Fields: ' + fields.join(' | '));
+        cb(false);
+        return;
+      }
 
-      pageClick('[data-testid="category-size-single-grid-input"]');
+      tryClickElement(input);
       setTimeout(function () {
-        var contentEl = document.querySelector('[data-testid="category-size-single-grid-content"]');
+        var contentEl = document.querySelector(SIZE_CONTENT_SELECTOR);
         if (!contentEl || !isVisible(contentEl)) {
-          pageClick('[data-testid^="category-size-single-grid-chevron"]');
+          pageClick(SIZE_CHEVRON_SELECTOR);
         }
 
         waitForSizeRoot(6000, function (root) {
@@ -1737,16 +1800,46 @@
           }
 
           var chips = sizeChipButtons(root);
-          var activeChip = root.querySelector('[data-testid="size-grid-chips"] button[aria-pressed="true"]');
-          var activeLabel = activeChip ? sizeChipLabel(activeChip) : (chips.length ? sizeChipLabel(chips[0]) : '');
+          var pressedChip = root.querySelector('[data-testid="size-grid-chips"] button[aria-pressed="true"]');
+          var pressedLabel = pressedChip ? sizeChipLabel(pressedChip) : '';
+          var preferredChip = chooseSizeChip(chips, parsed);
+          var preferredLabel = preferredChip ? sizeChipLabel(preferredChip) : '';
           var tried = {};
-          if (activeLabel) tried[activeLabel] = true;
-          relistLog('fillSize: dropdown found, active chip="' + activeLabel + '"');
 
-          tryCurrentChip(activeLabel, function (ok) {
-            if (ok) { closeSizeDropdown(); cb(true); return; }
-            tryNextChip();
-          });
+          relistLog(
+            'fillSize: dropdown found, pressed="' + pressedLabel +
+            '" preferred="' + preferredLabel + '"'
+          );
+
+          if (!chips.length) {
+            tried[''] = true;
+            tryCurrentChip('', function (ok) {
+              if (ok) { closeSizeDropdown(); cb(true); return; }
+              tryNextChip();
+            });
+            return;
+          }
+
+          var optionsNow = sizeOptionsIn(root);
+          var mustClickPreferred = preferredLabel &&
+            (pressedLabel !== preferredLabel || !optionsNow.length);
+
+          if (mustClickPreferred) {
+            tried[preferredLabel] = true;
+            clickSizeChip(preferredLabel, function (clicked) {
+              if (!clicked) { tryNextChip(); return; }
+              tryCurrentChip(preferredLabel, function (ok) {
+                if (ok) { closeSizeDropdown(); cb(true); return; }
+                tryNextChip();
+              });
+            });
+          } else {
+            if (preferredLabel) tried[preferredLabel] = true;
+            tryCurrentChip(preferredLabel, function (ok) {
+              if (ok) { closeSizeDropdown(); cb(true); return; }
+              tryNextChip();
+            });
+          }
 
           function tryNextChip() {
             var currentRoot = sizeDropdownRoot();
@@ -1849,17 +1942,18 @@
     return cleaned;
   }
 
+  function priceInputValue(value) {
+    var normalized = normalizePriceValue(value);
+    return normalized ? normalized.replace(',', '.') : '';
+  }
+
   function priceValuesEqual(actual, expected) {
-    var actualRaw = String(actual == null ? '' : actual).trim();
     var a = normalizePriceValue(actual);
     var e = normalizePriceValue(expected);
     if (!a || !e) return false;
-
-    // If the expected price has a decimal part, require the input to use the
-    // localized comma. A raw "49.00" is treated as not formatted correctly.
-    if (e.indexOf(',') !== -1 && actualRaw.indexOf(',') === -1) return false;
-
     if (a === e) return true;
+
+    // Accept both localized ("49,00") and dot-decimal ("49.00") input values.
     var an = Number(a.replace(',', '.'));
     var en = Number(e.replace(',', '.'));
     return Number.isFinite(an) && Number.isFinite(en) && an === en;
@@ -1891,11 +1985,17 @@
       return;
     }
 
-    relistLog('fillPrice: raw="' + (priceText || '') + '" normalized="' + normalized + '"');
+    var inputValue = priceInputValue(normalized);
+    relistLog(
+      'fillPrice: raw="' + (priceText || '') + '" normalized="' + normalized +
+      '" inputValue="' + inputValue + '"'
+    );
     waitForElement('[data-testid="price-input--input"]', 8000, function (input) {
       if (!input) { relistLog('fillPrice: price input NOT found after 8s'); cb(false); return; }
 
-      setReactInput(input, normalized);
+      // Vinted's controlled input parses comma decimals to NaN, so set a dot
+      // decimal string and let Vinted format it for display.
+      setReactInput(input, inputValue);
       waitForPriceValue(input, normalized, 1000, function (ok, actual) {
         if (ok) {
           relistLog('fillPrice: set value="' + actual + '"');
@@ -1904,7 +2004,7 @@
         }
 
         relistLog('fillPrice: setter did not stick (value="' + actual + '"), trying typing');
-        pageType('[data-testid="price-input--input"]', normalized);
+        pageType('[data-testid="price-input--input"]', inputValue);
         waitForPriceValue(input, normalized, 1800, function (ok2, actual2) {
           var current = currentPriceInput(input);
           if (current && current.blur) current.blur();

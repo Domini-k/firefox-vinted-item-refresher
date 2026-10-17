@@ -1,7 +1,7 @@
 # Implementation Plan — Firefox Vinted Item Refresher
 
 Last updated: 2026-10-17
-Current version: 1.4.9 (committed; Phase 5 follow-up changes uncommitted)
+Current version: 1.4.10 (uncommitted local bump; Phase 5 follow-up changes uncommitted)
 Default branch: `main`
 
 > Working agreement: update this file after every implementation session and
@@ -68,7 +68,7 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
   - `scrapeSelectedSize()` falls back to checked size options; `__NEXT_DATA__` size is used when the DOM value is empty.
   - Failure logs the active chips and visible options.
 - `learning-sources/ui-changes-snapshots/size-menu-changes-on-item-add-screen.html` — ROZMIAR markup fixture.
-- `tests/size-selection.test.js` — 9 tests covering parsing, scrape fallback, alpha/numeric selection, chip switching, no-chip grid, delayed render, node replacement, and no-match behavior.
+- `tests/size-selection.test.js` — 12 tests covering parsing, scrape fallback, `_chips` testid, id fallback, alpha/numeric selection, explicit S/M/L chip click, chip switching, no-chip grid, delayed render, node replacement, and no-match behavior.
 - `tests/price-fill.test.js` — 4 tests covering price normalization, setter fill, strict decimal localization, and typing fallback.
 - `tests/item-metadata.test.js` — 4 tests covering size extraction from member-card labels, including child sizes with commas.
 - `content.js` reliability fixes:
@@ -99,8 +99,8 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
 - `.gitignore` — ignores generated XPIs, `.env`, and `.env.*`, keeps `.env.example`.
 - Version remains `1.4.5` in `manifest.json`, `package.json`, `package-lock.json`.
 - Local build artifact:
-  - `firefox-permanent-addon-file-build/firefox-vinted-item-refresher-1.4.9.xpi`
-    — 34.0 KB, 13 runtime files, built after Phase 5.
+  - `firefox-permanent-addon-file-build/firefox-vinted-item-refresher-1.4.10.xpi`
+    — 34.6 KB, 13 runtime files, built after Phase 5.
 - GitHub releases verified:
   - `v1.4.5` — unsigned only (intentional).
   - `v1.4.6` — unsigned + signed `1.4.6`.
@@ -125,7 +125,11 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
 - If both the edit page and member card have no size, `fillSize()` is skipped correctly.
 - The size menu also exists in a no-chip variant (single grid). `sizeDropdownRoot()` now supports both chip and no-chip layouts.
 - React can replace the dropdown nodes after opening/chip clicks. `fillSize` now re-queries the DOM after each interaction and waits up to 6s.
-- Price failures are locale/timing related. `fillPrice` strips currency/NBSP, requires localized comma decimals, verifies the input, and retries with per-character typing.
+- The `S/M/L` chip often needs an explicit click before its grid renders. `fillSize` clicks the preferred chip when it is not pressed or when the grid is empty.
+- Chip clicks now retry on the button, its text span, and its parent, and check `aria-pressed`.
+- The current size input uses `category-size-single-grid_chips-input`; the code also supports the old testid and `#size`/`name="size"` fallbacks.
+- Edit-page logs now include `Size sources:` (NextData vs member card) and `Size final:` (DOM vs selected value).
+- Price failures are locale/timing related. `fillPrice` strips currency/NBSP, sets a dot decimal (`49.00`) because Vinted parses comma decimals to NaN, verifies the numeric value, and retries with per-character typing if the setter does not stick.
 - Shipment/package size is always set to `Średni` (middle), regardless of the scraped value.
 - AMO versions cannot be reused. Bump the version before every signed submission.
 - On 2026-10-17, AMO version `1.4.5` was accidentally submitted as unlisted during
@@ -279,7 +283,7 @@ Decision:
 
 Verification completed:
 
-- `npm test`: 38/38 passing (14 existing + 7 title + 9 size + 4 price + 4 metadata).
+- `npm test`: 41/41 passing (14 existing + 7 title + 12 size + 4 price + 4 metadata).
 - Alpha/numeric selection, no-chip grid, chip switching, delayed render, node replacement, price normalization/localization, member-card size extraction, and no-match tests pass.
 - Manual live Vinted check with `M / 38 / 10` is still pending.
 
@@ -364,10 +368,10 @@ Implementation:
    - Failure logs size-related elements and visible controls.
 2. Price:
    - `normalizePriceValue()` strips currency/NBSP and normalizes decimal separators.
-   - `fillPrice()` waits for the input, requires localized comma decimals, verifies the value, and retries with per-character typing.
+   - `fillPrice()` waits for the input, sets a dot decimal to avoid Vinted's comma-to-NaN parsing, verifies the numeric value, and retries with per-character typing.
    - Failure logs raw/normalized/actual values.
 3. Tests:
-   - `tests/size-selection.test.js` now has 9 tests, including no-chip grid, delayed render, and node replacement.
+   - `tests/size-selection.test.js` now has 12 tests, including `_chips` testid, id fallback, explicit S/M/L chip click, no-chip grid, delayed render, and node replacement.
    - `tests/price-fill.test.js` has 4 tests, including strict comma localization.
    - `tests/item-metadata.test.js` has 4 tests for member-card size extraction.
 4. Scraping:
@@ -377,7 +381,7 @@ Implementation:
 
 Verification:
 
-- `npm test`: 38/38 passing.
+- `npm test`: 41/41 passing.
 - Manual live Vinted check still pending.
 
 ---

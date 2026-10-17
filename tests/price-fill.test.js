@@ -38,18 +38,17 @@ test('fillPrice sets a normalized price value', async () => {
   });
 
   assert.equal(ok, true);
-  assert.equal(input.value, '49,00');
+  assert.equal(page.internals.normalizePriceValue(input.value), '49,00');
+  assert.equal(input.value, '49.00');
   page.close();
 });
 
-test('fillPrice retries when the setter leaves a dot decimal', async () => {
+test('fillPrice accepts a dot decimal when the value is numerically correct', async () => {
   const page = buildPage();
   const input = page.q('[data-testid="price-input--input"]');
-  let allowTyping = false;
 
-  input.addEventListener('keydown', () => { allowTyping = true; });
   input.addEventListener('input', () => {
-    if (!allowTyping) input.value = input.value.replace(',', '.');
+    input.value = input.value.replace(',', '.');
   });
 
   const ok = await new Promise((resolve) => {
@@ -58,7 +57,6 @@ test('fillPrice retries when the setter leaves a dot decimal', async () => {
 
   assert.equal(ok, true);
   assert.equal(page.internals.normalizePriceValue(input.value), '49,99');
-  assert.equal(String(input.value).includes(','), true);
   page.close();
 });
 
