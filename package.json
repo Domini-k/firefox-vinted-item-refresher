@@ -1,6 +1,6 @@
 {
   "name": "vinted-item-refresher-firefox",
-  "version": "1.4.9",
+  "version": "1.4.10",
   "private": true,
   "description": "Firefox add-on for refreshing Vinted listings — tests",
   "type": "commonjs",
