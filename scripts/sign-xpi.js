@@ -8,32 +8,47 @@ const { spawnSync } = require('node:child_process');
 
 const {
   ROOT,
-  OUTPUT_DIR,
   readJson,
   getVersion,
   validateManifest,
   stageExtension
 } = require('./build-xpi');
+const { waitForSignedXpi } = require('./amo-signing');
 
 const DEFAULT_APPROVAL_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_VALIDATION_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_APPROVAL_INTERVAL_MS = 5 * 1000;
 
 function webExtBinary() {
   const name = process.platform === 'win32' ? 'web-ext.cmd' : 'web-ext';
   return path.join(ROOT, 'node_modules', '.bin', name);
 }
 
-function approvalTimeoutMs() {
-  const raw = process.env.WEB_EXT_APPROVAL_TIMEOUT_MS;
-  if (raw == null || raw === '') return DEFAULT_APPROVAL_TIMEOUT_MS;
+function envNumber(name, defaultValue, allowZero) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return defaultValue;
 
   const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error('WEB_EXT_APPROVAL_TIMEOUT_MS must be a non-negative number');
+  const invalid = !Number.isFinite(value) || value < 0 || (!allowZero && value === 0);
+  if (invalid) {
+    throw new Error(name + ' must be a ' + (allowZero ? 'non-negative' : 'positive') + ' number');
   }
   return Math.floor(value);
 }
 
-function main() {
+function approvalTimeoutMs() {
+  return envNumber('WEB_EXT_APPROVAL_TIMEOUT_MS', DEFAULT_APPROVAL_TIMEOUT_MS, true);
+}
+
+function validationTimeoutMs() {
+  return envNumber('WEB_EXT_VALIDATION_TIMEOUT_MS', DEFAULT_VALIDATION_TIMEOUT_MS, false);
+}
+
+function approvalIntervalMs() {
+  return envNumber('WEB_EXT_APPROVAL_CHECK_INTERVAL_MS', DEFAULT_APPROVAL_INTERVAL_MS, false);
+}
+
+async function main() {
   const apiKey = process.env.WEB_EXT_API_KEY;
   const apiSecret = process.env.WEB_EXT_API_SECRET;
 
@@ -52,21 +67,22 @@ function main() {
     throw new Error('web-ext is not installed. Run "npm install" first.');
   }
 
-  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-  const outputPath = path.join(
-    OUTPUT_DIR,
-    'firefox-vinted-item-refresher-' + version + '-signed.xpi'
-  );
+  const approvalWaitMs = approvalTimeoutMs();
+  const validationWaitMs = validationTimeoutMs();
+  const checkIntervalMs = approvalIntervalMs();
+
+  console.log('Submitting version ' + version + ' to AMO...');
+  if (approvalWaitMs > 0) {
+    console.log(
+      'After submission, waiting up to ' + Math.round(approvalWaitMs / 60000) +
+      ' minute(s) for approval, checking every ' + Math.round(checkIntervalMs / 1000) + 's.'
+    );
+  } else {
+    console.log('Approval wait disabled (WEB_EXT_APPROVAL_TIMEOUT_MS=0); submission only.');
+  }
 
   const staged = stageExtension();
   const artifactsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vinted-sign-'));
-  const waitMs = approvalTimeoutMs();
-
-  if (waitMs > 0) {
-    console.log('Waiting up to ' + Math.round(waitMs / 60000) + ' minute(s) for AMO approval...');
-  } else {
-    console.log('AMO approval wait disabled (WEB_EXT_APPROVAL_TIMEOUT_MS=0).');
-  }
 
   try {
     const result = spawnSync(
@@ -76,7 +92,8 @@ function main() {
         '--source-dir', staged.stageDir,
         '--artifacts-dir', artifactsDir,
         '--channel', 'unlisted',
-        '--approval-timeout', String(waitMs),
+        '--timeout', String(validationWaitMs),
+        '--approval-timeout', '0',
         '--api-key', apiKey,
         '--api-secret', apiSecret
       ],
@@ -86,25 +103,24 @@ function main() {
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error('web-ext sign failed');
 
-    const signed = fs.readdirSync(artifactsDir)
-      .filter(function (name) { return name.endsWith('.xpi'); })
-      .map(function (name) {
-        const full = path.join(artifactsDir, name);
-        return { name: name, full: full, mtime: fs.statSync(full).mtimeMs };
-      })
-      .sort(function (a, b) { return b.mtime - a.mtime; });
-
-    if (!signed.length) {
-      throw new Error('web-ext did not produce a signed XPI');
+    if (approvalWaitMs === 0) {
+      console.log(
+        'Submitted to AMO. Use "npm run download:signed -- ' + version +
+        ' --wait" to fetch the signed XPI later.'
+      );
+      return null;
     }
 
-    fs.copyFileSync(signed[0].full, outputPath);
-    const stat = fs.statSync(outputPath);
+    const outputPath = await waitForSignedXpi({
+      version: version,
+      timeoutMs: approvalWaitMs,
+      intervalMs: checkIntervalMs,
+      wait: true
+    });
+
     console.log('Signed XPI: ' + path.relative(ROOT, outputPath));
     console.log('  version: ' + version);
-    console.log('  size: ' + (stat.size / 1024).toFixed(1) + ' KB');
     console.log('  channel: unlisted (not publicly listed on AMO)');
-
     return outputPath;
   } finally {
     fs.rmSync(staged.stageDir, { recursive: true, force: true });
@@ -113,10 +129,8 @@ function main() {
 }
 
 if (require.main === module) {
-  try {
-    main();
-  } catch (err) {
+  main().catch(function (err) {
     console.error('Signing failed: ' + err.message);
     process.exit(1);
-  }
+  });
 }

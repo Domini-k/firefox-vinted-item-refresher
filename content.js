@@ -31,6 +31,9 @@
   const SAVE_GRACE_MS   = 4000;
   const DRAFT_GRACE_MS  = 4000;
 
+  // Vinted rejects titles longer than 100 characters.
+  const TITLE_MAX_LENGTH = 100;
+
   // ── State ────────────────────────────────────────────────────────────────
   let mode     = null;
   let selected = new Set();
@@ -85,6 +88,20 @@
     });
 
     return items;
+  }
+
+  // Trims and limits a title to Vinted's maximum length. Uses JS string length
+  // (UTF-16 code units) and never leaves a dangling high surrogate at the cut.
+  function truncateTitle(title, onTruncate) {
+    const value = String(title == null ? '' : title).trim();
+    if (value.length <= TITLE_MAX_LENGTH) return value;
+
+    let cut = value.slice(0, TITLE_MAX_LENGTH);
+    if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+    cut = cut.replace(/\s+$/, '');
+
+    if (typeof onTruncate === 'function') onTruncate(value.length, cut.length);
+    return cut;
   }
 
   function resolveItemElement(el) {
@@ -593,7 +610,11 @@
     waitRemainingPause(job, 3000, function () {
       const scraped = scrapeItemFromNextData() || {};
       relistLog('__NEXT_DATA__: title=' + (scraped.title || 'NONE') + ' photos=' + (scraped.photos || []).length);
-      if (!scraped.title)  scraped.title  = job.title    || '';
+      if (!scraped.title) {
+        scraped.title = truncateTitle(job.title || '', function (before, after) {
+          relistLog('Title truncated: ' + before + ' -> ' + after + ' chars');
+        });
+      }
       if (!scraped.price)  scraped.price  = job.priceText || '';
       scraped.itemId = job.itemId;
 
@@ -654,7 +675,9 @@
         : collectPhotoUrlsFromItem(item);
 
       return {
-        title:       item.title       || '',
+        title:       truncateTitle(item.title || '', function (before, after) {
+          relistLog('Title truncated: ' + before + ' -> ' + after + ' chars');
+        }),
         description: item.description || '',
         price:       String(item.price_numeric != null ? item.price_numeric : (item.price || '')),
         photos:      photos,
@@ -847,7 +870,11 @@
         setReactTextarea(liveDesc, data.description);
         setTimeout(function () {
           const titleEl = document.querySelector('[data-testid="title--input"]');
-          if (titleEl) setReactInput(titleEl, data.title);
+          const safeTitle = truncateTitle(data.title, function (before, after) {
+            relistLog('Title truncated before save: ' + before + ' -> ' + after + ' chars');
+          });
+          if (safeTitle !== data.title) data.title = safeTitle;
+          if (titleEl) setReactInput(titleEl, safeTitle);
           const priceEl = document.querySelector('[data-testid="price-input--input"]');
           if (priceEl && data.price) setReactInput(priceEl, data.price);
 

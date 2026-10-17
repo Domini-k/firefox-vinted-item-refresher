@@ -1,7 +1,7 @@
 # Implementation Plan — Firefox Vinted Item Refresher
 
 Last updated: 2026-10-17
-Current version: 1.4.5
+Current version: 1.4.7
 Default branch: `main`
 
 > Working agreement: update this file after every implementation session and
@@ -13,11 +13,11 @@ Default branch: `main`
 - [x] Phase 1 — Clean, versioned XPI build
 - [x] Phase 1.5 — Build docs, `.env` support, AMO signing
 - [x] Phase 1.6 — Two-command release workflow + version alignment
-- [ ] Phase 2 — Title length validation (max 100 characters)
+- [x] Phase 2 — Title length validation (max 100 characters)
 - [ ] Phase 3 — ROZMIAR UI fix
-- [~] Phase 4 — GitHub Actions workflows implemented; first push/manual run pending
+- [x] Phase 4 — GitHub Actions unsigned + manual signed releases
 
-Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verified in GitHub
+Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verified
 
 ---
 
@@ -47,11 +47,20 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
   - `carry-forward` copies the latest signed XPI into a new release.
   - `publish-signed` uploads a signed XPI to its release and newer releases.
   - Never downgrades a newer signed asset.
+- `scripts/amo-signing.js`
+  - Shared AMO JWT, status lookup, download, and SHA-256 verification.
+  - Shared polling used by both signing and recovery.
 - `scripts/download-signed-xpi.js`
   - Downloads a signed XPI directly from AMO by version.
   - Verifies the SHA-256 hash reported by AMO.
-  - Supports `--wait` and `--timeout` while AMO is still approving.
+  - Supports `--wait`, `--timeout`, and `--interval` while AMO is still approving.
   - Used as `npm run download:signed -- <version>`.
+- `content.js` title handling
+  - `TITLE_MAX_LENGTH = 100`.
+  - `truncateTitle()` trims whitespace and limits titles without splitting surrogate pairs.
+  - Applied during scrape, feed-title fallback, and before filling the new-item title field.
+  - Logs original/final lengths when truncation happens.
+- `tests/title-length.test.js` — 7 tests covering limits, whitespace, emoji boundaries, null/undefined, and callback behavior.
 - `package.json`
   - `build:xpi` → build current version.
   - `sign:xpi` → sign current version.
@@ -74,20 +83,21 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
 - `.env.example` — AMO credential template.
 - `.gitignore` — ignores generated XPIs, `.env`, and `.env.*`, keeps `.env.example`.
 - Version remains `1.4.5` in `manifest.json`, `package.json`, `package-lock.json`.
-- Built artifacts exist:
-  - `firefox-permanent-addon-file-build/firefox-vinted-item-refresher-1.4.5.xpi`
-    — 29 KB, 13 runtime files.
-  - `firefox-permanent-addon-file-build/firefox-vinted-item-refresher-1.4.5-signed.xpi`
-    — 39 KB, downloaded from AMO after approval; SHA-256 verified.
+- Built artifacts exist locally:
+  - `firefox-vinted-item-refresher-1.4.5.xpi` — 29 KB, unsigned.
+  - `firefox-vinted-item-refresher-1.4.5-signed.xpi` — 39 KB, SHA-256 verified.
+  - `firefox-vinted-item-refresher-1.4.6-signed.xpi` — 39 KB, SHA-256 verified.
+  - `firefox-vinted-item-refresher-1.4.7-signed.xpi` — 39 KB, SHA-256 verified.
+- GitHub releases verified:
+  - `v1.4.5` — unsigned only (intentional).
+  - `v1.4.6` — unsigned + signed `1.4.6`.
+  - `v1.4.7` — unsigned + signed `1.4.7`.
 - `npm test`: 14/14 passing.
 - `npm run sign:xpi` fails fast with a clear message when credentials are missing.
 - AMO credentials are stored locally in `.env` (gitignored).
 
 ### Not done yet
 
-- First real GitHub Actions run (unsigned auto-release).
-- First manual signed workflow run.
-- Title truncation (Phase 2).
 - ROZMIAR fix (Phase 3).
 
 ### Known notes
@@ -95,12 +105,12 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
 - `web-ext lint` still reports:
   - `MISSING_DATA_COLLECTION_PERMISSIONS` (left out intentionally; adding it would warn until `strict_min_version` is raised to Firefox 140).
   - Two `UNSAFE_VAR_ASSIGNMENT` warnings in `content.js` (`innerHTML`).
+- Titles are trimmed and limited to 100 UTF-16 code units; a trailing high surrogate is dropped so emoji are not corrupted.
 - AMO versions cannot be reused. Bump the version before every signed submission.
 - On 2026-10-17, AMO version `1.4.5` was accidentally submitted as unlisted during
-  testing. It was approved at 13:02 UTC and the signed XPI was downloaded to
-  `firefox-permanent-addon-file-build/firefox-vinted-item-refresher-1.4.5-signed.xpi`
-  (SHA-256 verified against the AMO `file.hash`). Version `1.4.5` cannot be reused;
-  the next release is `1.4.6`.
+  testing. It was approved and the signed XPI was downloaded (SHA-256 verified).
+- Versions `1.4.6` and `1.4.7` were released through the normal workflow and are
+  signed on AMO and attached to their GitHub releases.
 - AMO signing limits per account: 3/minute, 10/hour, 24/day. File uploads: 6/minute, 20/hour, 48/day. Do not retry signing in a loop.
 - `npm run release` auto-increments the patch every run. Repeated local runs before committing move the version forward each time; only the committed version matters.
 - The unsigned workflow run name is `Unsigned release build from <commit SHA>`. The auto-bumped version cannot appear in `run-name` because GitHub only exposes `github`/`inputs` contexts there, not step outputs.
@@ -114,8 +124,9 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
 - The GitHub `v1.4.5` release was intentionally left unsigned-only after the first
   workflow failure; only future releases get the automatic signed-asset carry-forward.
 - `download:signed --if-signed` exits `0` when the XPI is public, `2` when the version is not submitted/not signed yet, and `1` for real errors. The signed workflow uses this to decide whether to sign or reuse.
-- `release:sign` waits up to 30 minutes for AMO approval by default, then downloads the signed XPI automatically. Override with `WEB_EXT_APPROVAL_TIMEOUT_MS`; set `0` to submit without waiting.
-- The GitHub signed workflow sets `WEB_EXT_APPROVAL_TIMEOUT_MS=3600000` (60 minutes).
+- `release:sign` submits with `--approval-timeout 0`, then polls AMO itself. Defaults: 30-minute approval timeout, 5-second check interval, 5-minute validation timeout.
+- Approval controls: `WEB_EXT_APPROVAL_TIMEOUT_MS`, `WEB_EXT_APPROVAL_CHECK_INTERVAL_MS`, `WEB_EXT_VALIDATION_TIMEOUT_MS`. Set the approval timeout to `0` to submit without waiting.
+- The GitHub signed workflow sets `WEB_EXT_APPROVAL_TIMEOUT_MS=3600000` (60 minutes) and `WEB_EXT_APPROVAL_CHECK_INTERVAL_MS=10000` (10 seconds).
 - It does not wait indefinitely. If approval takes longer, the AMO submission still exists; use `npm run download:signed -- <version> [--wait]` to recover it later.
 - If signing is interrupted before approval, no local signed file is written.
 - Release assets carry the latest signed XPI forward. A signed asset may be older than the release's unsigned asset.
@@ -150,11 +161,12 @@ npm run release:sign
 `release:sign`:
 
 1. Reads the current version.
-2. Signs it as AMO unlisted.
-3. Waits up to 30 minutes for approval by default, then downloads the signed XPI automatically.
-4. Uses `WEB_EXT_APPROVAL_TIMEOUT_MS` to override the wait; `0` skips waiting.
-5. Does not bump the version.
-6. Does not prompt.
+2. Submits it to AMO with web-ext using `--approval-timeout 0`.
+3. Polls AMO until the signed XPI is public, then downloads it automatically.
+4. Defaults: 30-minute approval timeout, 5-second check interval, 5-minute validation timeout.
+5. Uses `WEB_EXT_APPROVAL_TIMEOUT_MS`, `WEB_EXT_APPROVAL_CHECK_INTERVAL_MS`, and `WEB_EXT_VALIDATION_TIMEOUT_MS` to override the waits.
+6. Does not bump the version.
+7. Does not prompt.
 
 Recovery:
 
@@ -173,31 +185,27 @@ Verification completed:
 
 ## Phase 2 — Title length validation
 
-**Status:** not started
+**Status:** done
 
 Problem: legacy titles over 100 characters cause Vinted save failures and stall the tool.
 
 Implementation:
 
-1. Add `TITLE_MAX_LENGTH = 100` and `truncateTitle()` in `content.js`.
-2. Trim surrounding whitespace.
-3. Truncate using JS string length without splitting a surrogate pair.
-4. Apply in:
+1. `TITLE_MAX_LENGTH = 100` and `truncateTitle()` in `content.js`.
+2. Trims surrounding whitespace.
+3. Truncates using JS string length without splitting a surrogate pair.
+4. Applied in:
    - `scrapeItemFromNextData()`
    - the feed-title fallback in `runRelistJobOnEditPage()`
    - before `setReactInput(titleEl, ...)` in `runRelistJobOnNewItemPage()`
-5. Log original and final lengths when truncation happens.
-6. Add `tests/title-length.test.js` covering:
-   - 99, 100, 101 characters
-   - trailing whitespace
-   - emoji at the boundary
-   - null/undefined
-7. Expose `truncateTitle` through `tests/helpers.js`.
+5. Logs original and final lengths when truncation happens.
+6. `tests/title-length.test.js` covers 99/100/101 characters, whitespace, emoji boundaries, null/undefined, and callback behavior.
+7. `truncateTitle` exposed through `tests/helpers.js`.
 
-Verification:
+Verification completed:
 
-- `npm test`
-- Manual refresh of an item with a >100-character title.
+- `npm test`: 21/21 passing (14 existing + 7 title tests).
+- Manual refresh with a >100-character title still needs a live Vinted check.
 
 ---
 
@@ -255,7 +263,7 @@ Verification:
 
 ## Phase 4 — GitHub Actions
 
-**Status:** implemented, first real run pending
+**Status:** done
 
 ### Unsigned workflow
 
@@ -287,21 +295,22 @@ Verification:
   3. `npm ci` and `npm test`.
   4. Verify the manifest version matches.
   5. Check AMO for an existing signed file. If present, download and reuse it.
-  6. Otherwise run `npm run release:sign` and wait up to 60 minutes.
+  6. Otherwise run `npm run release:sign`: submit to AMO, then poll for up to 60 minutes (every 10 seconds) and download the signed XPI.
   7. Upload the signed XPI to the release.
   8. Copy it forward to newer releases without downgrading a newer signed asset.
 - Secrets: `WEB_EXT_API_KEY`, `WEB_EXT_API_SECRET`.
 
-### Verification pending
+### Verification completed
 
-- Push to `main` and confirm:
-  - unsigned artifact exists;
-  - release `v<version>` exists with the unsigned XPI;
-  - latest signed XPI is carried forward when available.
-- Run the signed workflow manually and confirm:
-  - the signed XPI is attached to the correct release;
-  - newer releases receive the signed asset;
-  - a newer signed asset is never downgraded.
+- Push to `main` confirmed:
+  - unsigned artifacts exist;
+  - releases `v<version>` exist with unsigned XPIs;
+  - signed XPI carry-forward works.
+- Manual signed workflow confirmed:
+  - signed XPI attached to the correct release;
+  - `v1.4.6` and `v1.4.7` each have unsigned + signed assets;
+  - newer signed assets are not downgraded.
+- Run names use the commit SHA (`Unsigned release build from <sha>`).
 
 ---
 

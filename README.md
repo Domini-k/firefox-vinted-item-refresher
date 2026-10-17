@@ -72,8 +72,9 @@ Click the **VR** button fixed to the bottom-right corner of the page.
 **Full Refresh** scrapes the item's title, description, price, photos and attributes
 (category, brand, size, condition, colours, materials, shipment size) from the edit
 page, then opens `/items/new`, auto-fills the form, re-uploads the photos and saves a
-draft. **Edit Description** appends ` Polecam!` (with one randomised unicode space) to
-each item's description and saves.
+draft. Legacy titles over Vinted's 100-character limit are trimmed to 100 before the
+form is filled. **Edit Description** appends ` Polecam!` (with one randomised unicode
+space) to each item's description and saves.
 
 ---
 

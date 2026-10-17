@@ -163,11 +163,19 @@ before signing if you want the signed source and the release to match.
 npm run release:sign
 ```
 
-The script waits up to **30 minutes** for AMO approval by default, then downloads
-the signed XPI automatically. Override the wait with:
+The script submits to AMO, then polls until the signed XPI is available. Defaults:
+
+| Setting | Env variable | Default |
+|---|---|---|
+| Approval timeout | `WEB_EXT_APPROVAL_TIMEOUT_MS` | 30 min |
+| Check interval | `WEB_EXT_APPROVAL_CHECK_INTERVAL_MS` | 5 seconds |
+| Validation timeout | `WEB_EXT_VALIDATION_TIMEOUT_MS` | 5 min |
+
+Examples:
 
 ```bash
 WEB_EXT_APPROVAL_TIMEOUT_MS=3600000 npm run release:sign
+WEB_EXT_APPROVAL_CHECK_INTERVAL_MS=10000 npm run release:sign
 ```
 
 Set `WEB_EXT_APPROVAL_TIMEOUT_MS=0` to submit without waiting; use
@@ -201,7 +209,11 @@ To wait for approval before downloading:
 
 ```bash
 npm run download:signed -- 1.4.6 --wait
+npm run download:signed -- 1.4.6 --wait --interval 10 --timeout 1800
 ```
+
+`--interval` is the poll interval in seconds (default 5). `--timeout` is the total
+wait in seconds (default 900).
 
 The command verifies the SHA-256 hash reported by AMO and writes:
 

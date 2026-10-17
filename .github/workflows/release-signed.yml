@@ -105,6 +105,7 @@ jobs:
           WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
           WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
           WEB_EXT_APPROVAL_TIMEOUT_MS: 3600000
+          WEB_EXT_APPROVAL_CHECK_INTERVAL_MS: 45000
         run: npm run release:sign
 
       - name: Publish signed release asset
