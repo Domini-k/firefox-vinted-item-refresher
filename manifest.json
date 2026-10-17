@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Vinted Item Refresher",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "description": "Select and refresh your Vinted listings",
   "browser_specific_settings": {
     "gecko": {
