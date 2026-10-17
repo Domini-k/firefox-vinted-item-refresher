@@ -1,4 +1,5 @@
 name: Release unsigned XPI
+run-name: Unsigned release build from ${{ github.sha }}
 
 on:
   push:

@@ -228,6 +228,8 @@ Two workflows live in `.github/workflows/`:
 ### Automatic unsigned release
 
 `release-unsigned.yml` runs on every push to `main` and can also be run manually.
+Its Actions run name is `Unsigned release build from <commit SHA>`; the release
+version is shown in the GitHub Release title and the XPI filename.
 
 1. Runs tests.
 2. Compares the pushed `manifest.json` version with the previous commit.

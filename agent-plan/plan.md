@@ -60,6 +60,7 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
   - `web-ext` devDependency.
 - `.github/workflows/release-unsigned.yml`
   - Runs on push to `main` and manually.
+  - Actions run name is `Unsigned release build from <commit SHA>`.
   - Detects whether the pushed commit already bumped the version.
   - Bumps the patch and pushes a bot commit when needed.
   - Builds and uploads the unsigned XPI.
@@ -102,6 +103,7 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
   the next release is `1.4.6`.
 - AMO signing limits per account: 3/minute, 10/hour, 24/day. File uploads: 6/minute, 20/hour, 48/day. Do not retry signing in a loop.
 - `npm run release` auto-increments the patch every run. Repeated local runs before committing move the version forward each time; only the committed version matters.
+- The unsigned workflow run name is `Unsigned release build from <commit SHA>`. The auto-bumped version cannot appear in `run-name` because GitHub only exposes `github`/`inputs` contexts there, not step outputs.
 - The unsigned workflow may push a version-bump commit to `main` with `GITHUB_TOKEN`. Such pushes do not trigger another workflow, so there is no loop.
 - Branch protection must allow the Actions bot to push to `main`; otherwise CI cannot auto-bump.
 - If CI bumps the version, pull the new commit before continuing local work.
