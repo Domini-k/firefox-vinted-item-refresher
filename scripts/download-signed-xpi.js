@@ -44,10 +44,14 @@ async function fetchVersion(version, token) {
   });
 
   if (response.status === 404) {
-    throw new Error('Version ' + version + ' was not found on AMO');
+    const error = new Error('Version ' + version + ' was not found on AMO');
+    error.status = 404;
+    throw error;
   }
   if (!response.ok) {
-    throw new Error('AMO version lookup failed: HTTP ' + response.status + ' ' + response.statusText);
+    const error = new Error('AMO version lookup failed: HTTP ' + response.status + ' ' + response.statusText);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -79,7 +83,7 @@ function sleep(ms) {
   return new Promise(function (resolve) { setTimeout(resolve, ms); });
 }
 
-async function downloadSigned(version, wait, timeoutSeconds) {
+async function downloadSigned(version, wait, timeoutSeconds, ifSigned) {
   const apiKey = process.env.WEB_EXT_API_KEY;
   const apiSecret = process.env.WEB_EXT_API_SECRET;
   if (!apiKey || !apiSecret) {
@@ -90,7 +94,17 @@ async function downloadSigned(version, wait, timeoutSeconds) {
   const deadline = Date.now() + timeoutSeconds * 1000;
 
   while (true) {
-    const detail = await fetchVersion(version, token);
+    let detail;
+    try {
+      detail = await fetchVersion(version, token);
+    } catch (err) {
+      if (ifSigned && err.status === 404) {
+        console.log('AMO version ' + version + ': not submitted yet.');
+        return null;
+      }
+      throw err;
+    }
+
     const file = detail.file || {};
     const status = file.status || 'unknown';
     console.log('AMO version ' + version + ': ' + status);
@@ -113,6 +127,10 @@ async function downloadSigned(version, wait, timeoutSeconds) {
     }
 
     if (!wait) {
+      if (ifSigned) {
+        console.log('Version ' + version + ' is not signed yet (status: ' + status + ').');
+        return null;
+      }
       throw new Error(
         'Version ' + version + ' is not signed yet (status: ' + status + '). ' +
         'Re-run with --wait or try again later.'
@@ -132,16 +150,18 @@ async function downloadSigned(version, wait, timeoutSeconds) {
 
 function usage() {
   [
-    'Usage: node scripts/download-signed-xpi.js [<version>] [--wait] [--timeout <seconds>]',
+    'Usage: node scripts/download-signed-xpi.js [<version>] [--wait] [--timeout <seconds>] [--if-signed]',
     '',
     '  <version>            Version to download. Default: current manifest version.',
     '  --wait               Wait for AMO approval before downloading.',
     '  --timeout <seconds>  Maximum wait time with --wait. Default: 900.',
+    '  --if-signed          Exit 2 when the version is not signed yet (for CI checks).',
     '',
     'Examples:',
     '  npm run download:signed',
     '  npm run download:signed -- 1.4.6',
-    '  npm run download:signed -- 1.4.6 --wait'
+    '  npm run download:signed -- 1.4.6 --wait',
+    '  npm run download:signed -- 1.4.6 --if-signed'
   ].forEach(function (line) { console.log(line); });
 }
 
@@ -153,6 +173,7 @@ async function main() {
   }
 
   const wait = args.includes('--wait');
+  const ifSigned = args.includes('--if-signed');
   const timeoutIndex = args.indexOf('--timeout');
   const timeout = timeoutIndex === -1 ? 900 : Number(args[timeoutIndex + 1]);
   if (!Number.isFinite(timeout) || timeout <= 0) {
@@ -170,7 +191,8 @@ async function main() {
     throw new Error('Invalid version "' + version + '". Expected format: 1.2.3');
   }
 
-  await downloadSigned(version, wait, timeout);
+  const output = await downloadSigned(version, wait, timeout, ifSigned);
+  if (output === null) process.exitCode = 2;
 }
 
 if (require.main === module) {

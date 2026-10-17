@@ -250,10 +250,13 @@ If CI bumps the version, pull the new commit before continuing local work.
 
 1. Choose a version, or leave it empty to use the latest release.
 2. Checks out that exact release tag.
-3. Runs tests and `npm run release:sign`.
-4. Waits up to **60 minutes** for AMO approval, then downloads the signed XPI.
-5. Uploads the signed XPI to that release.
-6. Copies the signed XPI forward to newer releases, without downgrading a newer
+3. Runs tests.
+4. Checks AMO for an existing signed file. If the version is already signed, it
+   downloads and reuses that file instead of submitting again.
+5. If not signed yet, runs `npm run release:sign` and waits up to **60 minutes**
+   for AMO approval.
+6. Uploads the signed XPI to that release.
+7. Copies the signed XPI forward to newer releases, without downgrading a newer
    signed asset.
 
 Repository secrets required:

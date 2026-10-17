@@ -105,7 +105,13 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
 - The unsigned workflow may push a version-bump commit to `main` with `GITHUB_TOKEN`. Such pushes do not trigger another workflow, so there is no loop.
 - Branch protection must allow the Actions bot to push to `main`; otherwise CI cannot auto-bump.
 - If CI bumps the version, pull the new commit before continuing local work.
-- The signed workflow never bumps the version. It signs an existing release tag.
+- The signed workflow never bumps the version. It signs an existing release tag, or
+  downloads and reuses the signed XPI if that version is already signed on AMO.
+- `release-assets.js` lists releases with `gh api` because `gh release list --json`
+  does not expose an `assets` field in the GitHub runner's `gh` version.
+- The GitHub `v1.4.5` release was intentionally left unsigned-only after the first
+  workflow failure; only future releases get the automatic signed-asset carry-forward.
+- `download:signed --if-signed` exits `0` when the XPI is public, `2` when the version is not submitted/not signed yet, and `1` for real errors. The signed workflow uses this to decide whether to sign or reuse.
 - `release:sign` waits up to 30 minutes for AMO approval by default, then downloads the signed XPI automatically. Override with `WEB_EXT_APPROVAL_TIMEOUT_MS`; set `0` to submit without waiting.
 - The GitHub signed workflow sets `WEB_EXT_APPROVAL_TIMEOUT_MS=3600000` (60 minutes).
 - It does not wait indefinitely. If approval takes longer, the AMO submission still exists; use `npm run download:signed -- <version> [--wait]` to recover it later.
@@ -278,9 +284,10 @@ Verification:
   2. Check out that exact tag.
   3. `npm ci` and `npm test`.
   4. Verify the manifest version matches.
-  5. Run `npm run release:sign`.
-  6. Upload the signed XPI to the release.
-  7. Copy it forward to newer releases without downgrading a newer signed asset.
+  5. Check AMO for an existing signed file. If present, download and reuse it.
+  6. Otherwise run `npm run release:sign` and wait up to 60 minutes.
+  7. Upload the signed XPI to the release.
+  8. Copy it forward to newer releases without downgrading a newer signed asset.
 - Secrets: `WEB_EXT_API_KEY`, `WEB_EXT_API_SECRET`.
 
 ### Verification pending

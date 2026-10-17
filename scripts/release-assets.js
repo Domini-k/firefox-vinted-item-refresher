@@ -27,15 +27,39 @@ function gh(args, options) {
   return execFileSync('gh', args, Object.assign({ encoding: 'utf8' }, options || {}));
 }
 
+function repoSlug() {
+  if (process.env.GITHUB_REPOSITORY) return process.env.GITHUB_REPOSITORY;
+
+  const slug = gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']).trim();
+  if (!slug) {
+    throw new Error('Could not determine the repository; set GITHUB_REPOSITORY');
+  }
+  return slug;
+}
+
 function listReleases() {
-  const raw = gh(['release', 'list', '--limit', '1000', '--json', 'tagName,isDraft,isPrerelease,assets']);
-  return JSON.parse(raw);
+  const endpoint = 'repos/' + repoSlug() + '/releases?per_page=100';
+  const raw = gh([
+    'api',
+    '--paginate',
+    endpoint,
+    '--jq',
+    '.[] | {tagName: .tag_name, assets: [.assets[].name]}'
+  ]);
+
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  return trimmed.split('\n').filter(Boolean).map(function (line) {
+    return JSON.parse(line);
+  });
 }
 
 function signedAssets(release) {
   return (release.assets || []).map(function (asset) {
-    const match = String(asset.name || '').match(SIGNED_RE);
-    return match ? { name: asset.name, version: match[1] } : null;
+    const name = typeof asset === 'string' ? asset : (asset && asset.name);
+    const match = String(name || '').match(SIGNED_RE);
+    return match ? { name: name, version: match[1] } : null;
   }).filter(Boolean);
 }
 

@@ -79,7 +79,28 @@ jobs:
             exit 1
           fi
 
+      - name: Check for existing signed XPI
+        id: existing
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+        shell: bash
+        run: |
+          set +e
+          npm run download:signed -- "${{ steps.version.outputs.version }}" --if-signed
+          STATUS=$?
+          set -e
+
+          if [ "$STATUS" -eq 0 ]; then
+            echo "already_signed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$STATUS" -eq 2 ]; then
+            echo "already_signed=false" >> "$GITHUB_OUTPUT"
+          else
+            exit "$STATUS"
+          fi
+
       - name: Sign XPI
+        if: steps.existing.outputs.already_signed != 'true'
         env:
           WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
           WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
