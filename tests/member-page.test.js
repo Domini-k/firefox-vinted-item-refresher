@@ -35,6 +35,7 @@ test('multi-select renders checkboxes and starts a batch relist', { skip: !MEMBE
   const job = JSON.parse(page.storageData['sah-relist-job']);
   assert.equal(job.phase, 'scrape');
   assert.ok(job.itemId, 'relist job carries the item id');
+  assert.ok(job.size, 'relist job carries the size from the member card');
   page.close();
 });
 
@@ -60,6 +61,7 @@ test('single-select renders radios and starts a relist', { skip: !MEMBER_HTML },
 
   const job = JSON.parse(page.storageData['sah-relist-job']);
   assert.ok(job.itemId, 'relist job carries the item id');
+  assert.ok(job.size, 'relist job carries the size from the member card');
   page.close();
 });
 

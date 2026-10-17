@@ -1,7 +1,7 @@
 # Implementation Plan — Firefox Vinted Item Refresher
 
 Last updated: 2026-10-17
-Current version: 1.4.9 (uncommitted local release bump)
+Current version: 1.4.9 (committed; Phase 5 follow-up changes uncommitted)
 Default branch: `main`
 
 > Working agreement: update this file after every implementation session and
@@ -16,6 +16,7 @@ Default branch: `main`
 - [x] Phase 2 — Title length validation (max 100 characters)
 - [x] Phase 3 — ROZMIAR UI fix
 - [x] Phase 4 — GitHub Actions unsigned + manual signed releases
+- [~] Phase 5 — Live size/price reliability fixes (implemented; live verification pending)
 
 Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verified
 
@@ -67,7 +68,14 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
   - `scrapeSelectedSize()` falls back to checked size options; `__NEXT_DATA__` size is used when the DOM value is empty.
   - Failure logs the active chips and visible options.
 - `learning-sources/ui-changes-snapshots/size-menu-changes-on-item-add-screen.html` — ROZMIAR markup fixture.
-- `tests/size-selection.test.js` — 6 tests covering parsing, scrape fallback, alpha selection, numeric selection, chip switching, and no-match behavior.
+- `tests/size-selection.test.js` — 9 tests covering parsing, scrape fallback, alpha/numeric selection, chip switching, no-chip grid, delayed render, node replacement, and no-match behavior.
+- `tests/price-fill.test.js` — 4 tests covering price normalization, setter fill, strict decimal localization, and typing fallback.
+- `tests/item-metadata.test.js` — 4 tests covering size extraction from member-card labels, including child sizes with commas.
+- `content.js` reliability fixes:
+  - `fillSize()` waits up to 6s for the dropdown, re-queries the root/chips/options after re-renders, and retries via child/parent click targets.
+  - `sizeDropdownRoot()` also supports categories with no chip bar (single size grid).
+  - Enhanced size failure diagnostics list size-related elements and visible controls.
+  - `fillPrice()` normalizes localized prices, requires comma decimals to be localized, verifies the input value, and falls back to character typing.
 - `package.json`
   - `build:xpi` → build current version.
   - `sign:xpi` → sign current version.
@@ -92,7 +100,7 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
 - Version remains `1.4.5` in `manifest.json`, `package.json`, `package-lock.json`.
 - Local build artifact:
   - `firefox-permanent-addon-file-build/firefox-vinted-item-refresher-1.4.9.xpi`
-    — 31.8 KB, 13 runtime files, built after Phase 3.
+    — 34.0 KB, 13 runtime files, built after Phase 5.
 - GitHub releases verified:
   - `v1.4.5` — unsigned only (intentional).
   - `v1.4.6` — unsigned + signed `1.4.6`.
@@ -104,8 +112,8 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
 
 ### Not done yet
 
-- Manual live verification of title truncation and ROZMIAR selection on Vinted.
-- Commit the Phase 3 changes and decide whether to keep the local `1.4.9` bump.
+- Manual live verification of Phase 5 size/price fixes on Vinted.
+- Commit the Phase 5 changes and release the next version.
 
 ### Known notes
 
@@ -113,6 +121,12 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
   - `MISSING_DATA_COLLECTION_PERMISSIONS` (left out intentionally; adding it would warn until `strict_min_version` is raised to Firefox 140).
   - Two `UNSAFE_VAR_ASSIGNMENT` warnings in `content.js` (`innerHTML`).
 - Titles are trimmed and limited to 100 UTF-16 code units; a trailing high surrogate is dropped so emoji are not corrupted.
+- Vinted can show a size on the listing while the edit page shows no selected size. The member-card `rozmiar:` value is now extracted and carried through the job as a fallback.
+- If both the edit page and member card have no size, `fillSize()` is skipped correctly.
+- The size menu also exists in a no-chip variant (single grid). `sizeDropdownRoot()` now supports both chip and no-chip layouts.
+- React can replace the dropdown nodes after opening/chip clicks. `fillSize` now re-queries the DOM after each interaction and waits up to 6s.
+- Price failures are locale/timing related. `fillPrice` strips currency/NBSP, requires localized comma decimals, verifies the input, and retries with per-character typing.
+- Shipment/package size is always set to `Średni` (middle), regardless of the scraped value.
 - AMO versions cannot be reused. Bump the version before every signed submission.
 - On 2026-10-17, AMO version `1.4.5` was accidentally submitted as unlisted during
   testing. It was approved and the signed XPI was downloaded (SHA-256 verified).
@@ -257,7 +271,7 @@ Implementation:
    - checked size option
    - `__NEXT_DATA__` `size_title`/`size`
 4. Failure logs the target, active chips, and visible option labels/testids.
-5. Added 6 regression tests using the snapshot.
+5. Added 8 regression tests using the snapshot, including delayed render and node replacement.
 
 Decision:
 
@@ -265,8 +279,8 @@ Decision:
 
 Verification completed:
 
-- `npm test`: 27/27 passing (14 existing + 7 title + 6 size).
-- Alpha selection, numeric selection, scrape fallback, parsing, and no-match tests pass.
+- `npm test`: 38/38 passing (14 existing + 7 title + 9 size + 4 price + 4 metadata).
+- Alpha/numeric selection, no-chip grid, chip switching, delayed render, node replacement, price normalization/localization, member-card size extraction, and no-match tests pass.
 - Manual live Vinted check with `M / 38 / 10` is still pending.
 
 ---
@@ -321,6 +335,50 @@ Verification completed:
   - `v1.4.6` and `v1.4.7` each have unsigned + signed assets;
   - newer signed assets are not downgraded.
 - Run names use the commit SHA (`Unsigned release build from <sha>`).
+
+---
+
+## Phase 5 — Live size/price reliability
+
+**Status:** implemented; live verification pending
+
+Problem: size still failed on the live page even though the static fixture tests passed, and price failed intermittently.
+
+Root causes:
+
+- The reported failing item genuinely had no size on the edit page (`Attrs: ... size=NONE`), so `fillSize()` was correctly skipped.
+- The current add screen also has categories with no chip bar, only a single size grid.
+- React can replace the size dropdown/chip nodes after opening or switching chips, leaving stale element references.
+- The size dropdown can render after the one-shot chips check, causing an early legacy fallback.
+- Price values arrived as `49.00` or `49,00 zł`; Vinted expects localized comma decimals, and the input can hydrate/format asynchronously.
+
+Implementation:
+
+1. Size:
+   - `waitForSizeRoot()` waits up to 6s for the dropdown.
+   - `sizeDropdownRoot()` supports categories with no chip bar.
+   - Root, chips, and options are re-queried after every click/re-render.
+   - Chip iteration uses a tried-label set against the live DOM.
+   - Option clicks retry on the element, its child span, and its parent.
+   - Verification checks current DOM plus the trigger value.
+   - Failure logs size-related elements and visible controls.
+2. Price:
+   - `normalizePriceValue()` strips currency/NBSP and normalizes decimal separators.
+   - `fillPrice()` waits for the input, requires localized comma decimals, verifies the value, and retries with per-character typing.
+   - Failure logs raw/normalized/actual values.
+3. Tests:
+   - `tests/size-selection.test.js` now has 9 tests, including no-chip grid, delayed render, and node replacement.
+   - `tests/price-fill.test.js` has 4 tests, including strict comma localization.
+   - `tests/item-metadata.test.js` has 4 tests for member-card size extraction.
+4. Scraping:
+   - `getItemData()` extracts `rozmiar:` from the member-card alt/title.
+   - The size is carried through single and batch jobs.
+   - `runRelistJobOnEditPage()` uses the job size when the edit page exposes none.
+
+Verification:
+
+- `npm test`: 38/38 passing.
+- Manual live Vinted check still pending.
 
 ---
 

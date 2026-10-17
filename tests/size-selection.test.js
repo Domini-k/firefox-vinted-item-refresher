@@ -6,14 +6,18 @@ const assert = require('node:assert/strict');
 const { createPage, fixture } = require('./helpers');
 
 const SIZE_HTML = fixture('ui-changes-snapshots/size-menu-changes-on-item-add-screen.html');
+const SIZE_HTML_NO_CHIPS = fixture('ui-changes-snapshots/2.size-menu-changes-on-item-add-screen.html');
 
-function buildPage() {
-  const snapshot = fs.readFileSync(SIZE_HTML, 'utf8');
+function buildPage(options) {
+  const o = options || {};
+  const snapshot = o.includeSnapshot === false
+    ? ''
+    : fs.readFileSync(o.snapshotPath || SIZE_HTML, 'utf8');
   const body =
     '<div>' +
       '<input data-testid="category-size-single-grid-input" id="size" readonly value="" />' +
       '<span data-testid="category-size-single-grid-chevron-down"></span>' +
-      snapshot +
+      '<div id="size-slot">' + snapshot + '</div>' +
     '</div>';
 
   return createPage(
@@ -56,6 +60,7 @@ function selectChip(page, label) {
 }
 
 const suiteOpts = { skip: !SIZE_HTML };
+const noChipsOpts = { skip: !SIZE_HTML_NO_CHIPS };
 
 test('parseSizeValue splits composite sizes into tokens', suiteOpts, () => {
   const page = buildPage();
@@ -90,6 +95,21 @@ test('fillSize selects the alpha token on the default S/M/L chip', suiteOpts, as
 
   assert.equal(ok, true);
   assert.equal(page.q('[data-testid="category-size-single-grid-input"]').value, 'M');
+  page.close();
+});
+
+test('fillSize works without a chip bar (single size grid)', noChipsOpts, async () => {
+  const page = buildPage({ snapshotPath: SIZE_HTML_NO_CHIPS });
+  const root = page.internals.sizeDropdownRoot();
+  assert.ok(root, 'size grid root found without chips');
+  wireOptions(page, root);
+
+  const ok = await new Promise((resolve) => {
+    page.internals.fillSize('L / 40 / 12', resolve);
+  });
+
+  assert.equal(ok, true);
+  assert.equal(page.q('[data-testid="category-size-single-grid-input"]').value, 'L');
   page.close();
 });
 
@@ -129,6 +149,61 @@ test('fillSize switches chips when the active chip has no match', suiteOpts, asy
       '<li><div role="checkbox" aria-checked="false" aria-label="38" data-testid="size-group-90-grid-option-38"><span>38</span></div></li>' +
       '<li><div role="checkbox" aria-checked="false" aria-label="10" data-testid="size-group-90-grid-option-10"><span>10</span></div></li>';
     wireOptions(page, root);
+  });
+
+  const ok = await new Promise((resolve) => {
+    page.internals.fillSize('Q / 38 / 10', resolve);
+  });
+
+  assert.equal(ok, true);
+  assert.equal(page.q('[data-testid="category-size-single-grid-input"]').value, '38');
+  page.close();
+});
+
+test('fillSize waits for a delayed size dropdown render', suiteOpts, async () => {
+  const page = buildPage({ includeSnapshot: false });
+  const snapshot = fs.readFileSync(SIZE_HTML, 'utf8');
+
+  setTimeout(() => {
+    page.q('#size-slot').innerHTML = snapshot;
+    const root = page.internals.sizeDropdownRoot();
+    wireChips(page);
+    wireOptions(page, root);
+  }, 800);
+
+  const ok = await new Promise((resolve) => {
+    page.internals.fillSize('M / 38 / 10', resolve);
+  });
+
+  assert.equal(ok, true);
+  assert.equal(page.q('[data-testid="category-size-single-grid-input"]').value, 'M');
+  page.close();
+});
+
+test('fillSize survives the chip bar being replaced after a chip click', suiteOpts, async () => {
+  const page = buildPage();
+  const root = page.internals.sizeDropdownRoot();
+  wireChips(page);
+  wireOptions(page, root);
+
+  const euChip = page.qa('[data-testid="size-grid-chips"] button')
+    .find((button) => button.textContent.trim() === 'EU');
+  assert.ok(euChip, 'EU chip exists');
+
+  euChip.addEventListener('click', () => {
+    const replacement = page.document.createElement('div');
+    replacement.className = 'web_ui__Card__card';
+    replacement.innerHTML =
+      '<div data-testid="size-grid-chips">' +
+        '<div><button type="button" aria-pressed="false">S/M/L</button></div>' +
+        '<div><button type="button" aria-pressed="true">EU</button></div>' +
+      '</div>' +
+      '<ul>' +
+        '<li><div role="checkbox" aria-checked="false" aria-label="38" data-testid="size-group-90-grid-option-38"><span>38</span></div></li>' +
+      '</ul>';
+    root.replaceWith(replacement);
+    wireChips(page);
+    wireOptions(page, replacement);
   });
 
   const ok = await new Promise((resolve) => {

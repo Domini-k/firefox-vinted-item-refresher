@@ -13,7 +13,8 @@ const INTERNALS = [
   'clickExistingOrNewOption', 'waitForMatchingOption', 'scrapeColorsFromDropdown',
   'clickOptionEl', 'getOptionTitle', 'isVisible', 'waitRemainingPause',
   'editDescription', 'truncateTitle', 'parseSizeValue', 'fillSize',
-  'sizeDropdownRoot', 'sizeOptionsIn', 'scrapeSelectedSize'
+  'sizeDropdownRoot', 'sizeOptionsIn', 'scrapeSelectedSize',
+  'normalizePriceValue', 'fillPrice', 'extractSizeFromItemLabel'
 ];
 
 /**

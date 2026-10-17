@@ -555,6 +555,7 @@
       itemId:    item.id,
       title:     item.title,
       priceText: item.priceText,
+      size:      item.size || '',
       url:       item.url
     };
     localStorage.setItem(SAH_RELIST_KEY, JSON.stringify(job));
@@ -576,10 +577,11 @@
       itemId:    first.id,
       title:     first.title,
       priceText: first.priceText,
+      size:      first.size || '',
       url:       first.url,
       batch: {
         queue: rest.map(function (it) {
-          return { id: it.id, title: it.title, priceText: it.priceText, url: it.url };
+          return { id: it.id, title: it.title, priceText: it.priceText, size: it.size || '', url: it.url };
         }),
         done: []
       }
@@ -616,6 +618,7 @@
         });
       }
       if (!scraped.price)  scraped.price  = job.priceText || '';
+      if (!scraped.size)   scraped.size   = job.size      || '';
       scraped.itemId = job.itemId;
 
       waitForElement('[data-testid="description--input"]', 12000, function (desc) {
@@ -880,35 +883,36 @@
           });
           if (safeTitle !== data.title) data.title = safeTitle;
           if (titleEl) setReactInput(titleEl, safeTitle);
-          const priceEl = document.querySelector('[data-testid="price-input--input"]');
-          if (priceEl && data.price) setReactInput(priceEl, data.price);
 
-          relistLog('Filling brand/size/condition...');
-          fillItemAttributes(data, function () {
-            relistLog('Attributes filled — uploading photos...');
-            const photoCount = data.photos ? data.photos.length : 0;
-            if (photoCount > 0) {
-              updateRelistOverlay('Uploading ' + photoCount + ' photo(s)...');
-              uploadPhotos(data.photos, function (uploaded) {
-                if (uploaded > 0) {
-                  updateRelistOverlay('Waiting for ' + uploaded + ' photo(s) to upload to CDN...');
-                  waitForPhotosUploaded(uploaded, 90000, function (ok) {
-                    if (!ok) {
-                      localStorage.removeItem(SAH_RELIST_KEY);
-                      updateRelistOverlay('Photo upload timed out. Verify photos, then click "Wersja robocza" manually.');
-                      return;
-                    }
-                    clickDraftAndFinish(data);
-                  });
-                } else {
-                  localStorage.removeItem(SAH_RELIST_KEY);
-                  updateRelistOverlay('Photos not injected. Add manually, then click "Wersja robocza".');
-                }
-              });
-            } else {
-              updateRelistOverlay('No source photos — saving draft...');
-              setTimeout(function () { clickDraftAndFinish(data); }, 500);
-            }
+          relistLog('Filling price...');
+          fillPrice(data.price, function () {
+            relistLog('Filling brand/size/condition...');
+            fillItemAttributes(data, function () {
+              relistLog('Attributes filled — uploading photos...');
+              const photoCount = data.photos ? data.photos.length : 0;
+              if (photoCount > 0) {
+                updateRelistOverlay('Uploading ' + photoCount + ' photo(s)...');
+                uploadPhotos(data.photos, function (uploaded) {
+                  if (uploaded > 0) {
+                    updateRelistOverlay('Waiting for ' + uploaded + ' photo(s) to upload to CDN...');
+                    waitForPhotosUploaded(uploaded, 90000, function (ok) {
+                      if (!ok) {
+                        localStorage.removeItem(SAH_RELIST_KEY);
+                        updateRelistOverlay('Photo upload timed out. Verify photos, then click "Wersja robocza" manually.');
+                        return;
+                      }
+                      clickDraftAndFinish(data);
+                    });
+                  } else {
+                    localStorage.removeItem(SAH_RELIST_KEY);
+                    updateRelistOverlay('Photos not injected. Add manually, then click "Wersja robocza".');
+                  }
+                });
+              } else {
+                updateRelistOverlay('No source photos — saving draft...');
+                setTimeout(function () { clickDraftAndFinish(data); }, 500);
+              }
+            });
           });
         }, 600);
       }
@@ -976,6 +980,7 @@
         itemId:     next.id,
         title:      next.title,
         priceText:  next.priceText,
+        size:       next.size || '',
         url:        next.url,
         lastDoneAt: Date.now(),
         batch:      { queue: batchQueue.slice(1), done: batchDone }
@@ -1370,17 +1375,43 @@
 
   function sizeDropdownRoot() {
     var chips = document.querySelector('[data-testid="size-grid-chips"]');
-    if (!chips) return null;
-    return chips.closest('[data-testid="category-size-single-grid-content"]') ||
-           chips.closest('.web_ui__Card__card') ||
-           chips.parentElement ||
+    if (chips) {
+      return chips.closest('[data-testid="category-size-single-grid-content"]') ||
+             chips.closest('.web_ui__Card__card') ||
+             chips.parentElement ||
+             null;
+    }
+
+    // Some categories have no chip bar — only a single size grid.
+    var option = Array.from(document.querySelectorAll(
+      '[data-testid^="size-group-"], [data-testid^="size-suggestions-grid-option-"]'
+    )).find(isVisible);
+
+    if (!option) return null;
+
+    return option.closest('[data-testid="category-size-single-grid-content"]') ||
+           option.closest('.web_ui__Card__card') ||
+           option.parentElement ||
            null;
+  }
+
+  function waitForSizeRoot(timeoutMs, cb) {
+    var deadline = Date.now() + timeoutMs;
+
+    function check() {
+      var root = sizeDropdownRoot();
+      if (root) { cb(root); return; }
+      if (Date.now() >= deadline) { cb(null); return; }
+      setTimeout(check, 150);
+    }
+
+    check();
   }
 
   function sizeOptionsIn(root, includeHidden) {
     if (!root) return [];
     var nodes = Array.from(root.querySelectorAll(
-      '[role="checkbox"], [role="radio"], [data-testid^="size-group-"], [data-testid^="size-suggestions-grid-option-"]'
+      '[role="checkbox"], [role="radio"], [data-testid^="size-group-"], [data-testid^="size-suggestions-grid-option-"], [aria-checked]'
     ));
     var seen = new Set();
     var options = [];
@@ -1474,17 +1505,45 @@
     return selected ? sizeOptionLabel(selected) : '';
   }
 
-  function verifySizeSelection(option, token, cb) {
-    var deadline = Date.now() + 2000;
-    var label = option.label;
+  function isSizeLabelChecked(label) {
+    var normalized = normalizeSizeText(label);
+    if (!normalized) return false;
+
+    var root = sizeDropdownRoot();
+    var scope = root || document;
+    var nodes = Array.from(scope.querySelectorAll(
+      '[aria-checked="true"], [aria-selected="true"], input:checked'
+    ));
+
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      var candidate = sizeOptionLabel(el);
+
+      if (!candidate && el.closest) {
+        var owner = el.closest(
+          '[aria-label], [data-testid^="size-group-"], [data-testid^="size-suggestions-grid-option-"]'
+        );
+        if (owner) candidate = sizeOptionLabel(owner);
+      }
+
+      if (normalizeSizeText(candidate) === normalized) return true;
+    }
+
+    return false;
+  }
+
+  function verifySizeSelection(label, token, timeoutMs, cb) {
+    var deadline = Date.now() + (timeoutMs || 2500);
 
     function check() {
-      var checked = option.el.getAttribute('aria-checked') === 'true' ||
-                    option.el.getAttribute('aria-selected') === 'true';
-      var value = triggerSizeValue();
-      var valueMatches = sizeValueHasToken(value, label) || sizeValueHasToken(value, token);
+      if (isSizeLabelChecked(label)) { cb(true); return; }
 
-      if (checked || valueMatches) { cb(true); return; }
+      var value = triggerSizeValue();
+      if (sizeValueHasToken(value, label) || sizeValueHasToken(value, token)) {
+        cb(true);
+        return;
+      }
+
       if (Date.now() >= deadline) { cb(false); return; }
       setTimeout(check, 100);
     }
@@ -1492,21 +1551,88 @@
     check();
   }
 
-  function clickSizeChip(button, cb) {
+  function tryClickElement(el) {
+    if (!el) return;
+
+    var testid = el.getAttribute('data-testid');
+    if (testid) { pageClick('[data-testid="' + testid + '"]'); return; }
+
+    if (el.id) { pageClick('#' + el.id); return; }
+
+    var attr = 'data-sah-size-click';
+    var token = 'click' + Date.now() + Math.floor(Math.random() * 1000);
+    el.setAttribute(attr, token);
+    pageClick('[' + attr + '="' + token + '"]');
+    setTimeout(function () { el.removeAttribute(attr); }, 1000);
+  }
+
+  function clickSizeChip(label, cb) {
+    var root = sizeDropdownRoot();
+    var button = sizeChipButtons(root).find(function (candidate) {
+      return sizeChipLabel(candidate) === label;
+    });
+
+    if (!button) {
+      relistLog('fillSize: chip not found "' + label + '"');
+      cb(false);
+      return;
+    }
+
     var attr = 'data-sah-size-chip';
     var token = 'chip' + Date.now() + Math.floor(Math.random() * 1000);
     var hadAttr = button.hasAttribute(attr);
     var previous = button.getAttribute(attr);
 
     button.setAttribute(attr, token);
-    relistLog('fillSize: switching chip to "' + sizeChipLabel(button) + '"');
+    relistLog('fillSize: switching chip to "' + label + '"');
     pageClick('[' + attr + '="' + token + '"]');
 
     setTimeout(function () {
       if (hadAttr) button.setAttribute(attr, previous);
       else button.removeAttribute(attr);
-      cb();
-    }, 400);
+      cb(true);
+    }, 500);
+  }
+
+  function clickSizeOption(label, token, cb) {
+    var attempt = 0;
+
+    function next() {
+      var root = sizeDropdownRoot();
+      var options = sizeOptionsIn(root, true);
+      var option = findSizeTokenOption(options, label, false) ||
+                   findSizeTokenOption(options, token, false);
+
+      if (!option) {
+        if (attempt > 0) {
+          verifySizeSelection(label, token, 1500, cb);
+        } else {
+          cb(false);
+        }
+        return;
+      }
+
+      var candidates = [option.el];
+      var span = option.el.querySelector('span');
+      if (span) candidates.push(span);
+      if (option.el.parentElement) candidates.push(option.el.parentElement);
+
+      var candidate = candidates[Math.min(attempt, candidates.length - 1)];
+      attempt++;
+      relistLog('fillSize: click attempt ' + attempt + ' on "' + label + '"');
+      tryClickElement(candidate);
+
+      verifySizeSelection(label, token, 700, function (ok) {
+        if (ok) { cb(true); return; }
+        if (attempt >= candidates.length) {
+          verifySizeSelection(label, token, 1500, cb);
+          return;
+        }
+        next();
+      });
+    }
+
+    next();
   }
 
   function closeSizeDropdown() {
@@ -1537,14 +1663,51 @@
   }
 
   function logSizeFailure(parsed, root) {
-    var chips = root ? sizeChipButtons(root).map(sizeChipLabel) : [];
-    var options = root ? sizeOptionsIn(root, true) : [];
+    var currentRoot = root || sizeDropdownRoot();
+    var chips = currentRoot ? sizeChipButtons(currentRoot).map(sizeChipLabel) : [];
+    var options = currentRoot ? sizeOptionsIn(currentRoot, true) : [];
     var optionText = options.slice(0, 30).map(function (option) {
       var testid = option.el.getAttribute('data-testid');
       return option.label + (testid ? '(' + testid + ')' : '');
     }).join(' | ');
 
-    relistLog('fillSize: FAILED target="' + parsed.raw + '" chips=[' + chips.join(',') + '] options=[' + optionText + ']');
+    relistLog(
+      'fillSize: FAILED target="' + parsed.raw + '" root=' + (currentRoot ? 'yes' : 'no') +
+      ' value="' + triggerSizeValue() + '" chips=[' + chips.join(',') + '] options=[' + optionText + ']'
+    );
+
+    var sizeEls = Array.from(document.querySelectorAll('[data-testid*="size"]')).slice(0, 40).map(function (el) {
+      var testid = el.getAttribute('data-testid') || '';
+      var role = el.getAttribute('role') || '';
+      var label = el.getAttribute('aria-label') || '';
+      var checked = el.getAttribute('aria-checked') || el.getAttribute('aria-selected') || '';
+      var text = normalizeSizeText(el.textContent || '').slice(0, 40);
+
+      return el.tagName.toLowerCase() +
+        (testid ? '[' + testid + ']' : '') +
+        (role ? ' role=' + role : '') +
+        (label ? ' label="' + label + '"' : '') +
+        (checked ? ' checked=' + checked : '') +
+        (text ? ' text="' + text + '"' : '');
+    });
+    if (sizeEls.length) relistLog('fillSize: size elements: ' + sizeEls.join(' | '));
+
+    var controls = Array.from(document.querySelectorAll('[role="checkbox"], [role="radio"], button[aria-label]'))
+      .filter(isVisible)
+      .slice(0, 40)
+      .map(function (el) {
+        var testid = el.getAttribute('data-testid') || '';
+        var label = el.getAttribute('aria-label') || '';
+        var checked = el.getAttribute('aria-checked') || '';
+        var text = normalizeSizeText(el.textContent || '').slice(0, 40);
+
+        return el.tagName.toLowerCase() +
+          (testid ? '[' + testid + ']' : '') +
+          (label ? ' label="' + label + '"' : '') +
+          (checked ? ' checked=' + checked : '') +
+          (text ? ' text="' + text + '"' : '');
+      });
+    if (controls.length) relistLog('fillSize: visible controls: ' + controls.join(' | '));
   }
 
   function fillSize(sizeText, cb) {
@@ -1560,83 +1723,200 @@
         var contentEl = document.querySelector('[data-testid="category-size-single-grid-content"]');
         if (!contentEl || !isVisible(contentEl)) {
           pageClick('[data-testid^="category-size-single-grid-chevron"]');
-          setTimeout(run, 500);
-        } else {
-          run();
-        }
-      }, 400);
-
-      function run() {
-        var root = sizeDropdownRoot();
-        if (!root) {
-          relistLog('fillSize: no size-grid-chips found — using legacy matcher');
-          clickExistingOrNewOption(parsed.raw, 4000, function (ok) {
-            relistLog('fillSize: legacy ' + (ok ? 'CLICKED' : 'NOT FOUND'));
-            if (ok) closeSizeDropdown();
-            cb(ok);
-          });
-          return;
         }
 
-        var activeChip = root.querySelector('[data-testid="size-grid-chips"] button[aria-pressed="true"]');
-        var activeLabel = activeChip ? sizeChipLabel(activeChip) : '';
-        relistLog('fillSize: active chip="' + activeLabel + '"');
-
-        tryCurrentChip(root, activeLabel, function (ok) {
-          if (ok) { closeSizeDropdown(); cb(true); return; }
+        waitForSizeRoot(6000, function (root) {
+          if (!root) {
+            relistLog('fillSize: no size-grid-chips after 6s — using legacy matcher');
+            clickExistingOrNewOption(parsed.raw, 4000, function (ok) {
+              relistLog('fillSize: legacy ' + (ok ? 'CLICKED' : 'NOT FOUND'));
+              if (ok) closeSizeDropdown();
+              cb(ok);
+            });
+            return;
+          }
 
           var chips = sizeChipButtons(root);
-          var index = 0;
+          var activeChip = root.querySelector('[data-testid="size-grid-chips"] button[aria-pressed="true"]');
+          var activeLabel = activeChip ? sizeChipLabel(activeChip) : (chips.length ? sizeChipLabel(chips[0]) : '');
+          var tried = {};
+          if (activeLabel) tried[activeLabel] = true;
+          relistLog('fillSize: dropdown found, active chip="' + activeLabel + '"');
 
-          function nextChip() {
-            if (index >= chips.length) { logSizeFailure(parsed, root); cb(false); return; }
+          tryCurrentChip(activeLabel, function (ok) {
+            if (ok) { closeSizeDropdown(); cb(true); return; }
+            tryNextChip();
+          });
 
-            var chip = chips[index++];
+          function tryNextChip() {
+            var currentRoot = sizeDropdownRoot();
+            var currentChips = sizeChipButtons(currentRoot);
+            var chip = currentChips.find(function (candidate) {
+              var label = sizeChipLabel(candidate);
+              return label && !tried[label];
+            });
+
+            if (!chip) {
+              logSizeFailure(parsed, currentRoot);
+              cb(false);
+              return;
+            }
+
             var label = sizeChipLabel(chip);
-            if (!label || label === activeLabel) { nextChip(); return; }
-
-            clickSizeChip(chip, function () {
-              tryCurrentChip(root, label, function (ok2) {
+            tried[label] = true;
+            clickSizeChip(label, function (clicked) {
+              if (!clicked) { tryNextChip(); return; }
+              tryCurrentChip(label, function (ok2) {
                 if (ok2) { closeSizeDropdown(); cb(true); return; }
-                nextChip();
+                tryNextChip();
               });
             });
           }
 
-          nextChip();
-        });
-      }
+          function tryCurrentChip(chipLabel, done) {
+            var currentRoot = sizeDropdownRoot();
+            waitForSizeOptions(currentRoot, 3000, function (options) {
+              if (!options.length) { done(false); return; }
 
-      function tryCurrentChip(root, chipLabel, done) {
-        waitForSizeOptions(root, 2000, function (options) {
-          if (!options.length) { done(false); return; }
+              var alphaChip = sizeChipIsAlpha(chipLabel);
+              var tokens = alphaChip
+                ? parsed.alpha.concat(parsed.numeric)
+                : parsed.numeric.concat(parsed.alpha);
+              if (!tokens.length) tokens = parsed.tokens.slice();
 
-          var alphaChip = sizeChipIsAlpha(chipLabel);
-          var tokens = alphaChip
-            ? parsed.alpha.concat(parsed.numeric)
-            : parsed.numeric.concat(parsed.alpha);
-          if (!tokens.length) tokens = parsed.tokens.slice();
+              var index = 0;
+              function tryNext() {
+                if (index >= tokens.length) { done(false); return; }
 
-          var index = 0;
-          function tryNext() {
-            if (index >= tokens.length) { done(false); return; }
+                var token = tokens[index++];
+                var option = findSizeTokenOption(options, token, !alphaChip);
+                if (!option) { tryNext(); return; }
 
-            var token = tokens[index++];
-            var option = findSizeTokenOption(options, token, !alphaChip);
-            if (!option) { tryNext(); return; }
+                relistLog('fillSize: chip="' + chipLabel + '" token="' + token + '" option="' + option.label + '"');
+                clickSizeOption(option.label, token, function (ok) {
+                  if (ok) { done(true); return; }
+                  relistLog('fillSize: selection not confirmed for "' + option.label + '"');
+                  tryNext();
+                });
+              }
 
-            relistLog('fillSize: chip="' + chipLabel + '" token="' + token + '" option="' + option.label + '"');
-            clickOptionEl(option.el);
-            verifySizeSelection(option, token, function (ok) {
-              if (ok) { done(true); return; }
-              relistLog('fillSize: selection not confirmed for "' + option.label + '"');
               tryNext();
             });
           }
-
-          tryNext();
         });
+      }, 400);
+    });
+  }
+
+  // ── Price selection ──────────────────────────────────────────────────────
+  // Vinted's price input is localized ("49,00 zł"), while the scraped value
+  // may be numeric ("49.00") or include the currency and NBSP.
+  function normalizePriceValue(value) {
+    var raw = String(value == null ? '' : value)
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!raw) return '';
+
+    var cleaned = raw.replace(/zł|PLN/gi, '').replace(/\s/g, '');
+    var lastComma = cleaned.lastIndexOf(',');
+    var lastDot = cleaned.lastIndexOf('.');
+
+    if (lastComma !== -1 && lastDot !== -1) {
+      if (lastComma > lastDot) {
+        // 1.234,56 -> 1234,56
+        cleaned = cleaned.replace(/\./g, '');
+      } else {
+        // 1,234.56 -> 1234,56
+        cleaned = cleaned.replace(/,/g, '').replace('.', ',');
       }
+    } else if (lastDot !== -1) {
+      var dotParts = cleaned.split('.');
+      if (dotParts.length === 2 && dotParts[1].length === 3) {
+        // 1.234 -> 1234
+        cleaned = dotParts[0] + dotParts[1];
+      } else {
+        // 49.99 -> 49,99
+        cleaned = cleaned.replace('.', ',');
+      }
+    }
+
+    cleaned = cleaned.replace(/[^0-9,\-]/g, '');
+    var commaIndex = cleaned.indexOf(',');
+    if (commaIndex !== -1) {
+      cleaned = cleaned.slice(0, commaIndex + 1) + cleaned.slice(commaIndex + 1).replace(/,/g, '');
+    }
+    return cleaned;
+  }
+
+  function priceValuesEqual(actual, expected) {
+    var actualRaw = String(actual == null ? '' : actual).trim();
+    var a = normalizePriceValue(actual);
+    var e = normalizePriceValue(expected);
+    if (!a || !e) return false;
+
+    // If the expected price has a decimal part, require the input to use the
+    // localized comma. A raw "49.00" is treated as not formatted correctly.
+    if (e.indexOf(',') !== -1 && actualRaw.indexOf(',') === -1) return false;
+
+    if (a === e) return true;
+    var an = Number(a.replace(',', '.'));
+    var en = Number(e.replace(',', '.'));
+    return Number.isFinite(an) && Number.isFinite(en) && an === en;
+  }
+
+  function currentPriceInput(fallback) {
+    return document.querySelector('[data-testid="price-input--input"]') || fallback;
+  }
+
+  function waitForPriceValue(fallback, expected, timeoutMs, cb) {
+    var deadline = Date.now() + timeoutMs;
+
+    function check() {
+      var input = currentPriceInput(fallback);
+      var actual = input ? input.value : '';
+      if (priceValuesEqual(actual, expected)) { cb(true, actual); return; }
+      if (Date.now() >= deadline) { cb(false, actual); return; }
+      setTimeout(check, 100);
+    }
+
+    check();
+  }
+
+  function fillPrice(priceText, cb) {
+    var normalized = normalizePriceValue(priceText);
+    if (!normalized || !/\d/.test(normalized)) {
+      relistLog('fillPrice: no usable price value (raw="' + (priceText || '') + '")');
+      cb(false);
+      return;
+    }
+
+    relistLog('fillPrice: raw="' + (priceText || '') + '" normalized="' + normalized + '"');
+    waitForElement('[data-testid="price-input--input"]', 8000, function (input) {
+      if (!input) { relistLog('fillPrice: price input NOT found after 8s'); cb(false); return; }
+
+      setReactInput(input, normalized);
+      waitForPriceValue(input, normalized, 1000, function (ok, actual) {
+        if (ok) {
+          relistLog('fillPrice: set value="' + actual + '"');
+          cb(true);
+          return;
+        }
+
+        relistLog('fillPrice: setter did not stick (value="' + actual + '"), trying typing');
+        pageType('[data-testid="price-input--input"]', normalized);
+        waitForPriceValue(input, normalized, 1800, function (ok2, actual2) {
+          var current = currentPriceInput(input);
+          if (current && current.blur) current.blur();
+          if (ok2) {
+            relistLog('fillPrice: typed value="' + actual2 + '"');
+            cb(true);
+            return;
+          }
+          relistLog('fillPrice: FAILED expected="' + normalized + '" actual="' + actual2 + '"');
+          cb(false);
+        });
+      });
     });
   }
 
@@ -1697,7 +1977,7 @@
     if (data.size)                               steps.push(function (next) { fillSize(data.size, function () { next(); }); });
     if (data.colors && data.colors.length)       steps.push(function (next) { fillMultiSelect('color-select-dropdown-input', data.colors, function () { next(); }); });
     if (data.materials && data.materials.length) steps.push(function (next) { fillMultiSelect('category-material-multi-list-input', data.materials, function () { next(); }); });
-    var shipment = 'Duży';
+    var shipment = 'Średni';
     steps.push(function (next) {
       relistLog('Selecting shipment size: ' + shipment);
       selectShipmentSize(shipment, function () { next(); });
@@ -1814,9 +2094,18 @@
   }
 
   // ── Extract item data from a grid-item element ───────────────────────────
+  // The member-card alt/title contains ", rozmiar: <size>, <price>". This is a
+  // fallback for items whose edit page fails to show the selected size.
+  function extractSizeFromItemLabel(label) {
+    const text = String(label == null ? '' : label);
+    let match = text.match(/, rozmiar:\s*(.+?),\s*\d[\d\s.,]*\s*zł\s*$/i);
+    if (!match) match = text.match(/, rozmiar:\s*([^,]+)/i);
+    return match ? match[1].trim() : '';
+  }
+
   function getItemData(gridItem) {
     const item = resolveItemElement(gridItem);
-    if (!item) return { url: '', title: '', thumbSrc: '', id: '', priceText: '' };
+    if (!item) return { url: '', title: '', thumbSrc: '', id: '', priceText: '', size: '' };
 
     const link  = item.matches && item.matches(SEL_LINK) ? item : item.querySelector(SEL_LINK);
     const thumb = item.matches && item.matches(SEL_THUMB) ? item : item.querySelector(SEL_THUMB);
@@ -1831,8 +2120,9 @@
     const hrefMatch = url.match(/\/items\/(\d+)/);
     const id        = (idMatch ? idMatch[1] : '') || (hrefMatch ? hrefMatch[1] : '');
     const priceText = price ? price.textContent.trim() : '';
+    const size      = extractSizeFromItemLabel(rawTitle);
 
-    return { url, title, thumbSrc, id, priceText };
+    return { url, title, thumbSrc, id, priceText, size };
   }
 
   function isSkippableItem(gridItem) {
@@ -2135,7 +2425,7 @@
       if (!data.id || seenIds.has(data.id)) return;
       if (selected.has(data.id)) {
         seenIds.add(data.id);
-        items.push({ id: data.id, url: data.url, title: data.title, priceText: data.priceText });
+        items.push({ id: data.id, url: data.url, title: data.title, priceText: data.priceText, size: data.size });
       }
     });
     return items;
