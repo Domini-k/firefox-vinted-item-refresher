@@ -1,13 +1,20 @@
 {
   "name": "vinted-item-refresher-firefox",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "private": true,
   "description": "Firefox add-on for refreshing Vinted listings — tests",
   "type": "commonjs",
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "build:xpi": "node scripts/build-xpi.js",
+    "sign:xpi": "node --env-file-if-exists=.env scripts/sign-xpi.js",
+    "release": "node scripts/release-xpi.js",
+    "release:sign": "node --env-file-if-exists=.env scripts/sign-xpi.js",
+    "release-sign": "node --env-file-if-exists=.env scripts/sign-xpi.js",
+    "download:signed": "node --env-file-if-exists=.env scripts/download-signed-xpi.js"
   },
   "devDependencies": {
-    "jsdom": "^30.0.1"
+    "jsdom": "^30.0.1",
+    "web-ext": "^10.8.0"
   }
 }

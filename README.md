@@ -6,15 +6,49 @@ requires **Firefox 128+** (the `content_scripts[].world: "MAIN"` key needs it).
 
 ## Loading in Firefox
 
+### Development (temporary)
+
 1. Run `node generate-icons.js` once to create the `icons/` folder (already done if it exists)
 2. Open Firefox → `about:debugging#/runtime/this-firefox`
 3. Click **Load Temporary Add-on**
 4. Select `manifest.json` in this folder (`firefox-vinted-item-refresher/`)
 5. Navigate to `https://www.vinted.pl/member/<your-id>`
 
-> A temporary add-on loses its ID (`browser_specific_settings.gecko.id`) and stored
-> settings on browser restart. For a persistent install, use `web-ext` or sign the
-> add-on on AMO.
+> A temporary add-on is removed when Firefox closes. Use the XPI build below for a
+> persistent install.
+
+### Build and install the XPI
+
+See [BUILD.md](BUILD.md) for the full guide. Quick commands:
+
+```bash
+npm install
+npm run release          # bump patch + build unsigned XPI
+npm run release:sign     # sign the current version, on demand only
+```
+
+`npm run release -- 1.4.6` uses an explicit version. `npm run build:xpi` rebuilds
+the current version without bumping it.
+
+Output:
+
+```
+firefox-permanent-addon-file-build/firefox-vinted-item-refresher-<version>.xpi
+firefox-permanent-addon-file-build/firefox-vinted-item-refresher-<version>-signed.xpi
+```
+
+For a permanent install:
+
+- **Unsigned:** Firefox Developer Edition, Nightly, or ESR with
+  `xpinstall.signatures.required = false`, then `about:addons` → gear →
+  **Install Add-on From File**.
+- **Signed, not listed in the store:** put AMO credentials in `.env` (see
+  `.env.example`) and run `npm run release:sign` when the version is ready. If it
+  times out or is interrupted, fetch the signed file later with
+  `npm run download:signed -- <version> --wait`.
+
+Regular Firefox and Beta reject unsigned XPIs. See [BUILD.md](BUILD.md) for
+versioning, signing, and troubleshooting details.
 
 ---
 
@@ -65,6 +99,12 @@ job-delay.js         Job pause (seconds) normalisation
 popup.html/js/css    Browser action popup
 generate-icons.js    One-time: creates icons/ with 16/48/128px PNGs
 icons/               Generated teal PNG icons
+BUILD.md             Build, permanent-install, and AMO signing guide
+.env.example         AMO credential template (copy to .env; .env is ignored)
+.github/workflows/   Automatic unsigned release + manual signed release
+scripts/             XPI build/sign/release tasks — npm run release / release:sign
+firefox-permanent-addon-file-build/
+                     Generated versioned XPI output (not committed)
 tests/               Node test suite (jsdom) — npm test
 learning-sources/    Reference: saved Vinted page DOM (fixtures for the test suite)
 ```

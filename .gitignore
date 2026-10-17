@@ -3,3 +3,8 @@
 # Claude.md
 
 node_modules/
+firefox-permanent-addon-file-build/*.xpi
+
+.env
+.env.*
+!.env.example

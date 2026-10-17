@@ -1,0 +1,116 @@
+name: Release unsigned XPI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-unsigned-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Ensure zip is available
+        run: command -v zip >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y zip)
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          CURRENT=$(node -p "require('./manifest.json').version")
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            PREVIOUS=$(git show HEAD^:manifest.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{console.log(JSON.parse(s).version)})")
+          else
+            PREVIOUS=""
+          fi
+
+          if [ "$CURRENT" = "$PREVIOUS" ]; then
+            echo "needs_bump=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_bump=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+
+      - name: Bump patch version
+        id: bump
+        if: steps.version.outputs.needs_bump == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release-xpi.js --bump-only
+          VERSION=$(node -p "require('./manifest.json').version")
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json package.json package-lock.json
+          git commit -m "chore(release): v$VERSION [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Read final version
+        id: final
+        shell: bash
+        run: |
+          if [ -n "${{ steps.bump.outputs.version }}" ]; then
+            VERSION="${{ steps.bump.outputs.version }}"
+          else
+            VERSION=$(node -p "require('./manifest.json').version")
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build unsigned XPI
+        run: npm run build:xpi
+
+      - name: Upload unsigned artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-vinted-item-refresher-${{ steps.final.outputs.version }}-${{ github.run_number }}
+          path: firefox-permanent-addon-file-build/firefox-vinted-item-refresher-${{ steps.final.outputs.version }}.xpi
+          if-no-files-found: error
+
+      - name: Publish unsigned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v${{ steps.final.outputs.version }}"
+          FILE="firefox-permanent-addon-file-build/firefox-vinted-item-refresher-${{ steps.final.outputs.version }}.xpi"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$FILE" --clobber
+          else
+            gh release create "$TAG" "$FILE" --title "$TAG" --notes "Unsigned XPI build for $TAG"
+          fi
+
+      - name: Carry forward latest signed XPI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-assets.js carry-forward --tag "v${{ steps.final.outputs.version }}"

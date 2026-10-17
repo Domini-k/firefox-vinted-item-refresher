@@ -1,0 +1,98 @@
+name: Release signed XPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to sign (e.g. 1.4.6). Leave empty to use the latest release."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-signed
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_VERSION#v}"
+
+          if [ -z "$VERSION" ]; then
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+            if [ -z "$TAG" ]; then
+              echo "No releases found and no version input provided."
+              exit 1
+            fi
+            VERSION="${TAG#v}"
+          fi
+
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version: $VERSION"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ steps.version.outputs.version }}
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify manifest version
+        shell: bash
+        run: |
+          set -euo pipefail
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          if [ "$MANIFEST_VERSION" != "${{ steps.version.outputs.version }}" ]; then
+            echo "Manifest version $MANIFEST_VERSION does not match requested ${{ steps.version.outputs.version }}"
+            exit 1
+          fi
+
+      - name: Sign XPI
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+          WEB_EXT_APPROVAL_TIMEOUT_MS: 3600000
+        run: npm run release:sign
+
+      - name: Publish signed release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release-assets.js publish-signed \
+            --tag "${{ steps.version.outputs.tag }}" \
+            --version "${{ steps.version.outputs.version }}" \
+            --file "firefox-permanent-addon-file-build/firefox-vinted-item-refresher-${{ steps.version.outputs.version }}-signed.xpi"
