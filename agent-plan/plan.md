@@ -1,7 +1,7 @@
 # Implementation Plan — Firefox Vinted Item Refresher
 
 Last updated: 2026-10-17
-Current version: 1.4.7
+Current version: 1.4.9 (uncommitted local release bump)
 Default branch: `main`
 
 > Working agreement: update this file after every implementation session and
@@ -14,7 +14,7 @@ Default branch: `main`
 - [x] Phase 1.5 — Build docs, `.env` support, AMO signing
 - [x] Phase 1.6 — Two-command release workflow + version alignment
 - [x] Phase 2 — Title length validation (max 100 characters)
-- [ ] Phase 3 — ROZMIAR UI fix
+- [x] Phase 3 — ROZMIAR UI fix
 - [x] Phase 4 — GitHub Actions unsigned + manual signed releases
 
 Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verified
@@ -61,6 +61,13 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
   - Applied during scrape, feed-title fallback, and before filling the new-item title field.
   - Logs original/final lengths when truncation happens.
 - `tests/title-length.test.js` — 7 tests covering limits, whitespace, emoji boundaries, null/undefined, and callback behavior.
+- `content.js` ROZMIAR handling
+  - `parseSizeValue()` splits composite sizes such as `M / 38 / 10`.
+  - `fillSize()` uses `size-grid-chips`, prefers alpha sizes on `S/M/L`, and falls back to numeric chip switching.
+  - `scrapeSelectedSize()` falls back to checked size options; `__NEXT_DATA__` size is used when the DOM value is empty.
+  - Failure logs the active chips and visible options.
+- `learning-sources/ui-changes-snapshots/size-menu-changes-on-item-add-screen.html` — ROZMIAR markup fixture.
+- `tests/size-selection.test.js` — 6 tests covering parsing, scrape fallback, alpha selection, numeric selection, chip switching, and no-match behavior.
 - `package.json`
   - `build:xpi` → build current version.
   - `sign:xpi` → sign current version.
@@ -83,22 +90,22 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
 - `.env.example` — AMO credential template.
 - `.gitignore` — ignores generated XPIs, `.env`, and `.env.*`, keeps `.env.example`.
 - Version remains `1.4.5` in `manifest.json`, `package.json`, `package-lock.json`.
-- Built artifacts exist locally:
-  - `firefox-vinted-item-refresher-1.4.5.xpi` — 29 KB, unsigned.
-  - `firefox-vinted-item-refresher-1.4.5-signed.xpi` — 39 KB, SHA-256 verified.
-  - `firefox-vinted-item-refresher-1.4.6-signed.xpi` — 39 KB, SHA-256 verified.
-  - `firefox-vinted-item-refresher-1.4.7-signed.xpi` — 39 KB, SHA-256 verified.
+- Local build artifact:
+  - `firefox-permanent-addon-file-build/firefox-vinted-item-refresher-1.4.9.xpi`
+    — 31.8 KB, 13 runtime files, built after Phase 3.
 - GitHub releases verified:
   - `v1.4.5` — unsigned only (intentional).
   - `v1.4.6` — unsigned + signed `1.4.6`.
   - `v1.4.7` — unsigned + signed `1.4.7`.
+  - `v1.4.8` — unsigned `1.4.8` + signed `1.4.7` (carry-forward verified).
 - `npm test`: 14/14 passing.
 - `npm run sign:xpi` fails fast with a clear message when credentials are missing.
 - AMO credentials are stored locally in `.env` (gitignored).
 
 ### Not done yet
 
-- ROZMIAR fix (Phase 3).
+- Manual live verification of title truncation and ROZMIAR selection on Vinted.
+- Commit the Phase 3 changes and decide whether to keep the local `1.4.9` bump.
 
 ### Known notes
 
@@ -111,6 +118,10 @@ Legend: `[x]` done · `[ ]` not started · `[~]` implemented but not yet verifie
   testing. It was approved and the signed XPI was downloaded (SHA-256 verified).
 - Versions `1.4.6` and `1.4.7` were released through the normal workflow and are
   signed on AMO and attached to their GitHub releases.
+- `v1.4.8` is unsigned on GitHub and carries the signed `1.4.7` XPI forward, which
+  verifies the release-asset carry-forward behavior.
+- The working tree currently has an uncommitted local bump to `1.4.9` plus the
+  Phase 3 changes; `origin/main` is at `1.4.8`.
 - AMO signing limits per account: 3/minute, 10/hour, 24/day. File uploads: 6/minute, 20/hour, 48/day. Do not retry signing in a loop.
 - `npm run release` auto-increments the patch every run. Repeated local runs before committing move the version forward each time; only the committed version matters.
 - The unsigned workflow run name is `Unsigned release build from <commit SHA>`. The auto-bumped version cannot appear in `run-name` because GitHub only exposes `github`/`inputs` contexts there, not step outputs.
@@ -211,11 +222,11 @@ Verification completed:
 
 ## Phase 3 — ROZMIAR UI fix
 
-**Status:** not started
+**Status:** done
 
-Source snapshot:
+Source snapshot copied into the repo:
 
-`/home/djagodzki/Projects/vinted/chrome-vinted-item-refresher/learning-sources/ui-changes-snapshots/size-menu-changes-on-item-add-screen.html`
+`learning-sources/ui-changes-snapshots/size-menu-changes-on-item-add-screen.html`
 
 What changed:
 
@@ -227,37 +238,36 @@ What changed:
 
 Root cause:
 
-- Edit page still scrapes `M / 38 / 10`.
-- The generic matcher does not split the target on `/`, so it cannot match single-value options.
-- The size dropdown then stays blank.
+- Edit page scrapes a composite value such as `M / 38 / 10`.
+- The generic matcher could not match that against single-value options.
+- The size dropdown stayed blank.
 
 Implementation:
 
-1. Copy the snapshot into the Firefox repo as a test fixture.
-2. Add `parseSizeValue()` to extract tokens:
-   - `M / 38 / 10` → alpha `M`, numeric `38`, `10`.
-3. Add a dedicated `fillSize()` adapter:
-   - Open via input/chevron.
-   - Anchor the dropdown on `[data-testid="size-grid-chips"]`.
-   - Prefer the alpha token on the active `S/M/L` chip.
-   - Fall back to switching chips and matching numeric tokens.
-   - Verify `aria-checked` and the trigger value.
-   - Close the dropdown after selection.
-4. Improve scraping fallbacks:
+1. `parseSizeValue()` splits composite sizes into raw, alpha, and numeric tokens.
+2. `fillSize()`:
+   - Opens via input/chevron.
+   - Anchors on `[data-testid="size-grid-chips"]`.
+   - Prefers alpha tokens on the active `S/M/L` chip.
+   - Switches chips and retries numeric tokens when needed.
+   - Verifies `aria-checked` and the trigger value.
+   - Closes the dropdown after selection.
+3. Scraping fallbacks:
    - input value
-   - checked/selected option text
-   - `__NEXT_DATA__` size fields
-5. On failure, log the scraped value, active chip, and visible option labels/testids.
-6. Add regression tests using the snapshot.
+   - checked size option
+   - `__NEXT_DATA__` `size_title`/`size`
+4. Failure logs the target, active chips, and visible option labels/testids.
+5. Added 6 regression tests using the snapshot.
 
 Decision:
 
 - Prefer alpha size (`M`) when available; otherwise use numeric token matching and chip switching.
 
-Verification:
+Verification completed:
 
-- `npm test`
-- Manual refresh of an item with size `M / 38 / 10` or equivalent.
+- `npm test`: 27/27 passing (14 existing + 7 title + 6 size).
+- Alpha selection, numeric selection, scrape fallback, parsing, and no-match tests pass.
+- Manual live Vinted check with `M / 38 / 10` is still pending.
 
 ---
 

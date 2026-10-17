@@ -680,6 +680,11 @@
         }),
         description: item.description || '',
         price:       String(item.price_numeric != null ? item.price_numeric : (item.price || '')),
+        size:        (function () {
+          var value = item.size_title || item.size || '';
+          if (value && typeof value === 'object') value = value.title || value.name || '';
+          return typeof value === 'string' ? value : '';
+        })(),
         photos:      photos,
         catalogId:   item.catalog_id  || null
       };
@@ -808,7 +813,7 @@
       category:     getTestIdVal('catalog-select-dropdown-input'),
       catalogId:    catalogId,
       brand:        getTestIdVal('brand-select-dropdown-input'),
-      size:         getTestIdVal('category-size-single-grid-input'),
+      size:         scrapeSelectedSize(),
       condition:    getTestIdVal('category-condition-single-list-input'),
       shipmentSize: shipmentSize,
       colors:       colors,
@@ -1328,6 +1333,313 @@
     });
   }
 
+  // ── Size selection ───────────────────────────────────────────────────────
+  // The new size menu has a chip bar (S/M/L, EU, UK, ...) and single-value
+  // options such as "M" or "38", while the edit page still exposes composite
+  // values like "M / 38 / 10". These helpers bridge the two formats.
+  function normalizeSizeText(value) {
+    return String(value == null ? '' : value)
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function parseSizeValue(value) {
+    var raw = normalizeSizeText(value);
+    if (!raw) return { raw: '', tokens: [], alpha: [], numeric: [] };
+
+    var tokens = raw.split(/\s*\/\s*/).map(normalizeSizeText).filter(Boolean);
+    if (!tokens.length) tokens = [raw];
+
+    var alpha = [];
+    var numeric = [];
+    tokens.forEach(function (token) {
+      if (/[a-z]/i.test(token)) alpha.push(token);
+      if (/\d/.test(token)) numeric.push(token);
+    });
+
+    return { raw: raw, tokens: tokens, alpha: alpha, numeric: numeric };
+  }
+
+  function sizeOptionLabel(el) {
+    if (!el) return '';
+    var label = normalizeSizeText(el.getAttribute('aria-label') || '');
+    if (label) return label;
+    return normalizeSizeText(getOptionTitle(el));
+  }
+
+  function sizeDropdownRoot() {
+    var chips = document.querySelector('[data-testid="size-grid-chips"]');
+    if (!chips) return null;
+    return chips.closest('[data-testid="category-size-single-grid-content"]') ||
+           chips.closest('.web_ui__Card__card') ||
+           chips.parentElement ||
+           null;
+  }
+
+  function sizeOptionsIn(root, includeHidden) {
+    if (!root) return [];
+    var nodes = Array.from(root.querySelectorAll(
+      '[role="checkbox"], [role="radio"], [data-testid^="size-group-"], [data-testid^="size-suggestions-grid-option-"]'
+    ));
+    var seen = new Set();
+    var options = [];
+
+    nodes.forEach(function (el) {
+      if (seen.has(el)) return;
+      if (!includeHidden && !isVisible(el)) return;
+      var label = sizeOptionLabel(el);
+      if (!label) return;
+      seen.add(el);
+      options.push({ el: el, label: label });
+    });
+
+    options.sort(function (a, b) {
+      var aTestId = a.el.getAttribute('data-testid') || '';
+      var bTestId = b.el.getAttribute('data-testid') || '';
+      var aSuggested = aTestId.indexOf('size-suggestions-grid-option-') === 0;
+      var bSuggested = bTestId.indexOf('size-suggestions-grid-option-') === 0;
+      if (aSuggested !== bSuggested) return aSuggested ? 1 : -1;
+      return 0;
+    });
+
+    return options;
+  }
+
+  function sizeChipButtons(root) {
+    if (!root) return [];
+    return Array.from(root.querySelectorAll('[data-testid="size-grid-chips"] button'));
+  }
+
+  function sizeChipLabel(button) {
+    return button ? normalizeSizeText(button.textContent || '') : '';
+  }
+
+  function sizeChipIsAlpha(label) {
+    var value = normalizeSizeText(label);
+    return value === 'S/M/L' ||
+      value.indexOf('/') !== -1 ||
+      /^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|4XL|5XL|6XL|7XL|8XL|9XL)$/i.test(value);
+  }
+
+  function findSizeTokenOption(options, token, numericPreferred) {
+    var normalized = normalizeSizeText(token);
+    if (!normalized) return null;
+
+    var matches = options.filter(function (option) {
+      return option.label === normalized;
+    });
+
+    if (!matches.length) {
+      matches = options.filter(function (option) {
+        var parts = option.label.split(/\s*\/\s*/);
+        return parts.indexOf(normalized) !== -1;
+      });
+    }
+
+    if (!matches.length) return null;
+
+    if (numericPreferred) {
+      var numeric = matches.find(function (option) { return /\d/.test(option.label); });
+      if (numeric) return numeric;
+    } else {
+      var alpha = matches.find(function (option) {
+        return /[a-z]/i.test(option.label) && !/\d/.test(option.label);
+      });
+      if (alpha) return alpha;
+    }
+
+    return matches[0];
+  }
+
+  function triggerSizeValue() {
+    var input = document.querySelector('[data-testid="category-size-single-grid-input"]');
+    return normalizeSizeText(input ? input.value : '');
+  }
+
+  function sizeValueHasToken(value, token) {
+    var normalizedValue = normalizeSizeText(value);
+    var normalizedToken = normalizeSizeText(token);
+    if (!normalizedValue || !normalizedToken) return false;
+    if (normalizedValue === normalizedToken) return true;
+    return normalizedValue.split(/\s*\/\s*/).indexOf(normalizedToken) !== -1;
+  }
+
+  function scrapeSelectedSize() {
+    var value = getTestIdVal('category-size-single-grid-input');
+    if (value) return normalizeSizeText(value);
+
+    var selected = document.querySelector('[data-testid^="size-group-"][aria-checked="true"]') ||
+      document.querySelector('[data-testid^="size-suggestions-grid-option-"][aria-checked="true"]');
+    return selected ? sizeOptionLabel(selected) : '';
+  }
+
+  function verifySizeSelection(option, token, cb) {
+    var deadline = Date.now() + 2000;
+    var label = option.label;
+
+    function check() {
+      var checked = option.el.getAttribute('aria-checked') === 'true' ||
+                    option.el.getAttribute('aria-selected') === 'true';
+      var value = triggerSizeValue();
+      var valueMatches = sizeValueHasToken(value, label) || sizeValueHasToken(value, token);
+
+      if (checked || valueMatches) { cb(true); return; }
+      if (Date.now() >= deadline) { cb(false); return; }
+      setTimeout(check, 100);
+    }
+
+    check();
+  }
+
+  function clickSizeChip(button, cb) {
+    var attr = 'data-sah-size-chip';
+    var token = 'chip' + Date.now() + Math.floor(Math.random() * 1000);
+    var hadAttr = button.hasAttribute(attr);
+    var previous = button.getAttribute(attr);
+
+    button.setAttribute(attr, token);
+    relistLog('fillSize: switching chip to "' + sizeChipLabel(button) + '"');
+    pageClick('[' + attr + '="' + token + '"]');
+
+    setTimeout(function () {
+      if (hadAttr) button.setAttribute(attr, previous);
+      else button.removeAttribute(attr);
+      cb();
+    }, 400);
+  }
+
+  function closeSizeDropdown() {
+    var root = sizeDropdownRoot();
+    if (!root || !isVisible(root)) return;
+
+    var chevron = document.querySelector('[data-testid^="category-size-single-grid-chevron"]');
+    if (chevron && chevron.getAttribute('data-testid')) {
+      pageClick('[data-testid="' + chevron.getAttribute('data-testid') + '"]');
+      return;
+    }
+
+    var input = document.querySelector('[data-testid="category-size-single-grid-input"]');
+    if (input) pageClick('[data-testid="category-size-single-grid-input"]');
+  }
+
+  function waitForSizeOptions(root, timeoutMs, cb) {
+    var deadline = Date.now() + timeoutMs;
+
+    function check() {
+      var options = sizeOptionsIn(root);
+      if (options.length) { cb(options); return; }
+      if (Date.now() >= deadline) { cb([]); return; }
+      setTimeout(check, 150);
+    }
+
+    check();
+  }
+
+  function logSizeFailure(parsed, root) {
+    var chips = root ? sizeChipButtons(root).map(sizeChipLabel) : [];
+    var options = root ? sizeOptionsIn(root, true) : [];
+    var optionText = options.slice(0, 30).map(function (option) {
+      var testid = option.el.getAttribute('data-testid');
+      return option.label + (testid ? '(' + testid + ')' : '');
+    }).join(' | ');
+
+    relistLog('fillSize: FAILED target="' + parsed.raw + '" chips=[' + chips.join(',') + '] options=[' + optionText + ']');
+  }
+
+  function fillSize(sizeText, cb) {
+    var parsed = parseSizeValue(sizeText);
+    if (!parsed.raw) { cb(false); return; }
+    relistLog('fillSize: target="' + parsed.raw + '" tokens=[' + parsed.tokens.join(',') + ']');
+
+    waitForElement('[data-testid="category-size-single-grid-input"]', 8000, function (input) {
+      if (!input) { relistLog('fillSize: size input NOT found after 8s'); cb(false); return; }
+
+      pageClick('[data-testid="category-size-single-grid-input"]');
+      setTimeout(function () {
+        var contentEl = document.querySelector('[data-testid="category-size-single-grid-content"]');
+        if (!contentEl || !isVisible(contentEl)) {
+          pageClick('[data-testid^="category-size-single-grid-chevron"]');
+          setTimeout(run, 500);
+        } else {
+          run();
+        }
+      }, 400);
+
+      function run() {
+        var root = sizeDropdownRoot();
+        if (!root) {
+          relistLog('fillSize: no size-grid-chips found — using legacy matcher');
+          clickExistingOrNewOption(parsed.raw, 4000, function (ok) {
+            relistLog('fillSize: legacy ' + (ok ? 'CLICKED' : 'NOT FOUND'));
+            if (ok) closeSizeDropdown();
+            cb(ok);
+          });
+          return;
+        }
+
+        var activeChip = root.querySelector('[data-testid="size-grid-chips"] button[aria-pressed="true"]');
+        var activeLabel = activeChip ? sizeChipLabel(activeChip) : '';
+        relistLog('fillSize: active chip="' + activeLabel + '"');
+
+        tryCurrentChip(root, activeLabel, function (ok) {
+          if (ok) { closeSizeDropdown(); cb(true); return; }
+
+          var chips = sizeChipButtons(root);
+          var index = 0;
+
+          function nextChip() {
+            if (index >= chips.length) { logSizeFailure(parsed, root); cb(false); return; }
+
+            var chip = chips[index++];
+            var label = sizeChipLabel(chip);
+            if (!label || label === activeLabel) { nextChip(); return; }
+
+            clickSizeChip(chip, function () {
+              tryCurrentChip(root, label, function (ok2) {
+                if (ok2) { closeSizeDropdown(); cb(true); return; }
+                nextChip();
+              });
+            });
+          }
+
+          nextChip();
+        });
+      }
+
+      function tryCurrentChip(root, chipLabel, done) {
+        waitForSizeOptions(root, 2000, function (options) {
+          if (!options.length) { done(false); return; }
+
+          var alphaChip = sizeChipIsAlpha(chipLabel);
+          var tokens = alphaChip
+            ? parsed.alpha.concat(parsed.numeric)
+            : parsed.numeric.concat(parsed.alpha);
+          if (!tokens.length) tokens = parsed.tokens.slice();
+
+          var index = 0;
+          function tryNext() {
+            if (index >= tokens.length) { done(false); return; }
+
+            var token = tokens[index++];
+            var option = findSizeTokenOption(options, token, !alphaChip);
+            if (!option) { tryNext(); return; }
+
+            relistLog('fillSize: chip="' + chipLabel + '" token="' + token + '" option="' + option.label + '"');
+            clickOptionEl(option.el);
+            verifySizeSelection(option, token, function (ok) {
+              if (ok) { done(true); return; }
+              relistLog('fillSize: selection not confirmed for "' + option.label + '"');
+              tryNext();
+            });
+          }
+
+          tryNext();
+        });
+      }
+    });
+  }
+
   function fillMultiSelect(fieldTestId, values, cb) {
     if (!values || !values.length) { cb(false); return; }
     relistLog('fillMultiSelect: ' + fieldTestId + ' → ' + JSON.stringify(values));
@@ -1382,7 +1694,7 @@
     var steps = [];
     if (data.brand)                              steps.push(function (next) { fillBrand(data.brand, function () { next(); }); });
     if (data.condition)                          steps.push(function (next) { fillSingleSelect('category-condition-single-list-input', data.condition, function () { next(); }); });
-    if (data.size)                               steps.push(function (next) { fillSingleSelect('category-size-single-grid-input', data.size, function () { next(); }); });
+    if (data.size)                               steps.push(function (next) { fillSize(data.size, function () { next(); }); });
     if (data.colors && data.colors.length)       steps.push(function (next) { fillMultiSelect('color-select-dropdown-input', data.colors, function () { next(); }); });
     if (data.materials && data.materials.length) steps.push(function (next) { fillMultiSelect('category-material-multi-list-input', data.materials, function () { next(); }); });
     var shipment = 'Duży';

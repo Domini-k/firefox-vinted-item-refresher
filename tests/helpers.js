@@ -12,7 +12,8 @@ const INTERNALS = [
   'getFeedItems', 'getItemData', 'isSkippableItem', 'resolveItemElement',
   'clickExistingOrNewOption', 'waitForMatchingOption', 'scrapeColorsFromDropdown',
   'clickOptionEl', 'getOptionTitle', 'isVisible', 'waitRemainingPause',
-  'editDescription', 'truncateTitle'
+  'editDescription', 'truncateTitle', 'parseSizeValue', 'fillSize',
+  'sizeDropdownRoot', 'sizeOptionsIn', 'scrapeSelectedSize'
 ];
 
 /**
